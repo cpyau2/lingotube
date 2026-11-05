@@ -81,3 +81,14 @@ npm run build && node deploy/build-worker.mjs   # bundles dist/ into deploy/work
 
 - Demo video © TED-Ed (CC BY-NC-ND); English captions are TED-Ed's, the Chinese translation was written for this project.
 - API keys never leave the device and are excluded from JSON exports.
+
+## 自動抓字幕 (`GET /api/captions?v=<11-char id>`)
+
+The deployed Worker (`worker/captions.js`, inlined by `deploy/build-worker.mjs`) fetches subtitles server-side so the phone just pastes a link.
+
+- Returns `{title, en:[{start,end,text}], zh:[...], enSource, zhSource, note?, debug}`; the app merges with `mergeBilingual`.
+- yt-dlp and browser cookies can't run in a Worker (no Python/subprocess), so the same logic is reimplemented in JS: 11-char ID check → InnerTube `player` (ANDROID / IOS / ANDROID_VR clients, then watch-page scrape) → `captionTracks` → json3 → cues (dedupe consecutive repeats; auto-captions are rebuilt into sentences from word timings).
+- English: manual track first, else auto (asr). Chinese: zh-Hant / zh-Hans track → YouTube machine translation (`tlang=zh-Hant`) → Workers AI (Qwen3, batched, binding `AI`) → public gtx.
+- YouTube's bot check is intermittent per Cloudflare IP; the app retries transient `blocked/failed` responses up to 3 times. Errors are Chinese (`blocked`, `no_en` = 「這部影片找不到英文字幕」, `unavailable`, `bad_id`).
+- Fallbacks on Home: paste text (SRT/VTT or YouTube "Show transcript" with `0:05` stamps), file import, local yt-dlp proxy.
+- Test: `node scripts/add-flow.mjs <url>` (phone-size add-video flow).

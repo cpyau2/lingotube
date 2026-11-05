@@ -20,7 +20,8 @@ function add(p) {
   }
 }
 walk(DIST)
-const worker = `const FILES = ${JSON.stringify(files)};
+const captionsSrc = fs.readFileSync('worker/captions.js', 'utf8').replace(/^export /gm, '')
+const worker = captionsSrc + `\nconst FILES = ${JSON.stringify(files)};
 const cache = new Map();
 function body(p) {
   const f = FILES[p];
@@ -29,9 +30,10 @@ function body(p) {
   return cache.get(p);
 }
 export default {
-  async fetch(req) {
-    if (req.method !== 'GET' && req.method !== 'HEAD') return new Response('Method Not Allowed', { status: 405 });
+  async fetch(req, env) {
+    if (req.method !== 'GET' && req.method !== 'HEAD' && new URL(req.url).pathname !== '/api/captions') return new Response('Method Not Allowed', { status: 405 });
     let p = new URL(req.url).pathname;
+    if (p === '/api/captions') return req.method === 'GET' ? handleCaptions(req, env) : new Response('Method Not Allowed', { status: 405 });
     if (p === '/') p = '/index.html';
     let status = 200;
     if (!FILES[p]) {
@@ -49,7 +51,7 @@ fs.writeFileSync('deploy/worker.js', worker)
 const code = `async () => {
 const SRC = ${JSON.stringify(worker)};
 const form = new FormData();
-form.append('metadata', new Blob([JSON.stringify({ main_module: 'worker.js', compatibility_date: '2026-01-01' })], { type: 'application/json' }));
+form.append('metadata', new Blob([JSON.stringify({ main_module: 'worker.js', compatibility_date: '2026-01-01', bindings: [{ type: 'ai', name: 'AI' }] })], { type: 'application/json' }));
 form.append('worker.js', new Blob([SRC], { type: 'application/javascript+module' }), 'worker.js');
 const put = await cloudflare.request({ method: 'PUT', path: \`/accounts/\${accountId}/workers/scripts/lingotube\`, body: form });
 return { success: put.success, errors: put.errors, id: put.result && put.result.id, size: SRC.length };

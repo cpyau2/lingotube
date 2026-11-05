@@ -66,3 +66,28 @@ export const fmtTime = (t: number) => {
   const s = Math.floor(t % 60)
   return `${m}:${s.toString().padStart(2, '0')}`
 }
+
+/**
+ * Parse pasted subtitle text. Accepts SRT / WebVTT, or a YouTube "Show transcript" copy:
+ *   0:05            0:05 Hello there
+ *   Hello there     (timestamp on the same line or on its own line, optional h:mm:ss)
+ */
+export function parseSubtitleText(raw: string): { start: number; end: number; text: string }[] {
+  if (raw.includes('-->')) return parseSubs(raw)
+  const lines = raw.replace(/\r/g, '').split('\n').map((l) => l.trim()).filter((l) => l.length)
+  const TS = /^(?:(\d{1,2}):)?(\d{1,2}):(\d{2})(?:\s+(.*))?$/
+  const items: { start: number; text: string }[] = []
+  let cur: { start: number; text: string } | null = null
+  for (const l of lines) {
+    const m = l.match(TS)
+    if (m) {
+      if (cur) items.push(cur)
+      cur = { start: Number(m[1] ?? 0) * 3600 + Number(m[2]) * 60 + Number(m[3]), text: (m[4] ?? '').trim() }
+    } else if (cur) {
+      cur.text = (cur.text + ' ' + l).trim()
+    }
+  }
+  if (cur) items.push(cur)
+  const clean = items.filter((i) => i.text)
+  return clean.map((c, i) => ({ start: c.start, end: clean[i + 1] ? Math.max(c.start + 0.5, clean[i + 1].start) : c.start + 4, text: c.text }))
+}

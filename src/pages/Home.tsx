@@ -2,7 +2,8 @@ import { useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../lib/db'
-import { mergeBilingual, parseSubs, parseYouTubeId, fmtTime } from '../lib/subs'
+import { mergeBilingual, parseSubs, parseSubtitleText, parseYouTubeId, fmtTime } from '../lib/subs'
+import { fetchAutoCaptions } from '../lib/autoCaptions'
 import { fetchViaProxy, DEFAULT_PROXY } from '../lib/captionsProxy'
 import { Page } from '../components/Page'
 import type { Cue } from '../lib/types'
@@ -23,50 +24,94 @@ async function guessTitle(id: string) {
 function AddVideo({ onDone }: { onDone: (id: string) => void }) {
   const [url, setUrl] = useState('')
   const [title, setTitle] = useState('')
+  const [pasteEn, setPasteEn] = useState('')
+  const [pasteZh, setPasteZh] = useState('')
   const [err, setErr] = useState('')
+  const [info, setInfo] = useState('')
+  const [progress, setProgress] = useState('')
   const [busy, setBusy] = useState(false)
   const enRef = useRef<HTMLInputElement>(null)
   const zhRef = useRef<HTMLInputElement>(null)
 
-  const submit = async (mode: 'files' | 'proxy') => {
-    setErr(''); setBusy(true)
+  const save = async (yid: string, t: string, cues: Cue[]) => {
+    t = t.trim() || (await guessTitle(yid))
+    await db.videos.put({ id: yid, youtubeId: yid, title: t, cues, createdAt: Date.now() })
+    onDone(yid)
+  }
+
+  const submit = async (mode: 'auto' | 'files' | 'paste' | 'proxy') => {
+    setErr(''); setInfo(''); setBusy(true)
+    const timers: number[] = []
     try {
       const yid = parseYouTubeId(url)
-      if (!yid) throw new Error('請貼上有效的 YouTube 連結')
-      let cues: Cue[] = []
-      let t = title.trim()
+      if (!yid) throw new Error('請先貼上有效嘅 YouTube 連結（例如 https://youtu.be/xxxxxxxxxxx）')
+      if (mode === 'auto') {
+        setProgress('連接 YouTube…')
+        timers.push(window.setTimeout(() => setProgress('下載字幕…'), 1500), window.setTimeout(() => setProgress('翻譯成中文（可能要幾秒）…'), 4000))
+        const r = await fetchAutoCaptions(yid, (n) => setProgress(`YouTube 暫時未肯俾字幕，重試第 ${n} 次…`))
+        if (!title.trim()) setTitle(r.title)
+        setProgress(`已取得 ${r.cues.length} 句字幕，儲存中…`)
+        if (r.note) setInfo(r.note)
+        await save(yid, title.trim() || r.title, r.cues)
+        return
+      }
       if (mode === 'proxy') {
         const px = (await db.kv.get('proxy-url'))?.value as string | undefined
         const r = await fetchViaProxy(yid, px || DEFAULT_PROXY)
-        cues = r.cues; t = t || r.title
-      } else {
-        const en = await readFile(enRef.current?.files?.[0])
-        if (!en?.length) throw new Error('請選擇英文字幕檔（.srt / .vtt），或改用本機字幕代理')
-        cues = mergeBilingual(en, await readFile(zhRef.current?.files?.[0]))
+        await save(yid, title.trim() || r.title, r.cues)
+        return
       }
-      t = t || (await guessTitle(yid))
-      await db.videos.put({ id: yid, youtubeId: yid, title: t, cues, createdAt: Date.now() })
-      onDone(yid)
+      if (mode === 'paste') {
+        const en = parseSubtitleText(pasteEn)
+        if (!en.length) throw new Error('未有可用嘅英文字幕文字。請貼上 SRT / VTT，或者 YouTube「顯示轉錄稿」複製出嚟、有時間（例如 0:05）嘅文字。')
+        const zh = pasteZh.trim() ? parseSubtitleText(pasteZh) : undefined
+        await save(yid, title, mergeBilingual(en, zh))
+        return
+      }
+      const enFile = enRef.current?.files?.[0]
+      if (!enFile) throw new Error('未揀字幕檔：請喺「英文字幕」撳「選擇檔案」，揀一個 .srt 或 .vtt 檔（中文字幕可選）。或者改用上面「自動抓字幕」／「貼上字幕文字」。')
+      const en = await readFile(enFile)
+      if (!en?.length) throw new Error('呢個檔案讀唔到字幕，請確認係 .srt 或 .vtt 格式')
+      await save(yid, title, mergeBilingual(en, await readFile(zhRef.current?.files?.[0])))
     } catch (e: any) {
       setErr(e?.message === 'Failed to fetch' ? '連唔到本機字幕代理（先執行 npm run captions-proxy）' : String(e?.message ?? e))
-    } finally { setBusy(false) }
+    } finally { timers.forEach(clearTimeout); setProgress(''); setBusy(false) }
   }
 
   return (
     <div className="card p-4 space-y-3" data-testid="add-video">
       <div className="font-semibold">＋ 加入 YouTube 影片</div>
-      <input type="url" placeholder="貼上 YouTube 連結" value={url} onChange={(e) => setUrl(e.target.value)} />
-      <input type="text" placeholder="標題（可留空）" value={title} onChange={(e) => setTitle(e.target.value)} />
-      <div className="grid sm:grid-cols-2 gap-2 text-xs text-slate-400">
-        <label className="space-y-1 block">英文字幕 .srt/.vtt<input ref={enRef} type="file" accept=".srt,.vtt,text/vtt" className="block w-full text-slate-300" /></label>
-        <label className="space-y-1 block">中文字幕（可選）<input ref={zhRef} type="file" accept=".srt,.vtt,text/vtt" className="block w-full text-slate-300" /></label>
+      <input type="url" inputMode="url" placeholder="貼上 YouTube 連結" value={url} onChange={(e) => setUrl(e.target.value)} data-testid="add-url" />
+      <input type="text" placeholder="標題（可留空，會自動填入）" value={title} onChange={(e) => setTitle(e.target.value)} />
+      <button className="btn w-full !py-3 text-base" disabled={busy || !url.trim()} onClick={() => submit('auto')} data-testid="auto-fetch">
+        {busy && progress ? <span className="animate-pulse">⏳ {progress}</span> : '✨ 自動抓字幕'}
+      </button>
+      {info && <div className="text-amber-300 text-sm" data-testid="add-info">{info}</div>}
+      {err && <div className="text-rose-300 text-sm" role="alert" data-testid="add-error">{err}</div>}
+
+      <div className="rounded-xl border border-line p-3" data-testid="manual-import">
+        <div className="text-sm text-slate-300">自動抓唔到？手動匯入字幕</div>
+        <div className="mt-3 space-y-4">
+          <div className="space-y-2">
+            <div className="text-sm font-medium">貼上字幕文字</div>
+            <textarea className="w-full min-h-28 bg-ink border border-line rounded-xl p-2.5 text-sm" placeholder={'貼上 SRT / VTT，或者 YouTube「顯示轉錄稿」複製嘅文字（例如：\n0:05\nHello everyone…）'} value={pasteEn} onChange={(e) => setPasteEn(e.target.value)} data-testid="paste-en" />
+            <textarea className="w-full min-h-16 bg-ink border border-line rounded-xl p-2.5 text-sm" placeholder="中文字幕文字（可留空）" value={pasteZh} onChange={(e) => setPasteZh(e.target.value)} />
+            <button className="btn ghost" disabled={busy} onClick={() => submit('paste')} data-testid="paste-submit">用貼上嘅字幕加入</button>
+          </div>
+          <div className="space-y-2">
+            <div className="text-sm font-medium">匯入字幕檔</div>
+            <div className="grid sm:grid-cols-2 gap-2 text-xs text-slate-400">
+              <label className="space-y-1 block">英文字幕 .srt/.vtt<input ref={enRef} type="file" accept=".srt,.vtt,text/vtt" className="block w-full text-slate-300" /></label>
+              <label className="space-y-1 block">中文字幕（可選）<input ref={zhRef} type="file" accept=".srt,.vtt,text/vtt" className="block w-full text-slate-300" /></label>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button className="btn ghost" disabled={busy} onClick={() => submit('files')}>匯入字幕檔</button>
+              <button className="btn ghost" disabled={busy} onClick={() => submit('proxy')} title="需要先在你電腦執行 npm run captions-proxy">用本機代理抓字幕</button>
+            </div>
+          </div>
+        </div>
       </div>
-      {err && <div className="text-rose-300 text-sm" role="alert">{err}</div>}
-      <div className="flex flex-wrap gap-2">
-        <button className="btn" disabled={busy} onClick={() => submit('files')}>匯入字幕檔</button>
-        <button className="btn ghost" disabled={busy} onClick={() => submit('proxy')} title="需要先在你電腦執行 npm run captions-proxy">用本機代理抓字幕</button>
-      </div>
-      <p className="text-xs text-slate-500">瀏覽器不能直接讀取 YouTube 字幕（CORS）。可匯入字幕檔，或在你電腦執行 <code>npm run captions-proxy</code>。</p>
+      <p className="text-xs text-slate-500">「自動抓字幕」會由伺服器讀取 YouTube 字幕（優先人手字幕，其次自動字幕），中文用現成中文字幕或機器翻譯。</p>
     </div>
   )
 }
