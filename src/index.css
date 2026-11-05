@@ -1,0 +1,36 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+  --color-ink: #0f172a;
+  --color-panel: #162036;
+  --color-panel2: #1d2a44;
+  --color-line: #2a3a5c;
+}
+
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: var(--color-ink);
+  color: #e2e8f0;
+  font-family: var(--font-sans);
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: none;
+}
+button { font: inherit; cursor: pointer; }
+.safe-b { padding-bottom: env(safe-area-inset-bottom); }
+.word { border-radius: 6px; padding: 0 1px; cursor: pointer; transition: background .12s; }
+.word:hover, .word:active { background: rgba(56,189,248,.25); }
+.word.saved { text-decoration: underline dotted #fbbf24; text-underline-offset: 4px; }
+.scroll-y { overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.chip { display:inline-flex; align-items:center; gap:.35rem; padding:.35rem .7rem; border-radius:999px; font-size:.8rem; border:1px solid var(--color-line); background: var(--color-panel); color:#cbd5e1; white-space:nowrap; }
+.chip[aria-pressed="true"] { background:#0ea5e9; border-color:#0ea5e9; color:#04121f; font-weight:600; }
+.btn { display:inline-flex; align-items:center; justify-content:center; gap:.4rem; padding:.55rem 1rem; border-radius:12px; background:#0ea5e9; color:#04121f; font-weight:600; border:0; }
+.btn.ghost { background: var(--color-panel2); color:#e2e8f0; border:1px solid var(--color-line); }
+.btn.danger { background:#7f1d1d; color:#fecaca; }
+.btn:disabled { opacity:.5; cursor:not-allowed; }
+.card { background: var(--color-panel); border:1px solid var(--color-line); border-radius:16px; }
+.soon { font-size:.65rem; padding:.1rem .4rem; border-radius:999px; background:#f59e0b22; color:#fbbf24; border:1px solid #f59e0b55; }
+input[type=text], input[type=password], input[type=url], select { background: var(--color-ink); border:1px solid var(--color-line); border-radius:10px; padding:.55rem .75rem; color:#e2e8f0; width:100%; }
+@keyframes sheet { from { transform: translateY(24px); opacity:0 } to { transform:none; opacity:1 } }
+.sheet-in { animation: sheet .18s ease-out; }
