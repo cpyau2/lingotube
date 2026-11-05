@@ -13,7 +13,7 @@ async function run(label, ctxOpts) {
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()) })
   page.on('pageerror', (e) => errors.push('pageerror: ' + e.message))
   // NOTE: with deviceScaleFactor 2, headless Chrome + a playing cross-origin YouTube iframe drops all input after a screenshot (harness artifact, reproduced with plain DOM listeners), so the phone profile uses DSF 1.
-  const shot = async (n) => { await page.screenshot({ path: `screenshots/${label}-${n}.png` }) }
+  const shot = async (n) => { await page.screenshot({ path: `${process.env.SHOT_DIR||'screenshots'}/${label}-${n}.png` }) }
 
   await page.goto(BASE + '/#/')
   await page.waitForSelector('[data-testid=video-card]')
@@ -151,7 +151,7 @@ const desktop = await run('desktop', { viewport: { width: 1280, height: 800 } })
   await page.locator('[data-idx="6"] .word', { hasText: 'confidence' }).first().click()
   await page.waitForSelector('[data-testid=word-zh]', { timeout: 8000 }).catch(() => {})
   ok('offline: bundled gloss gives word meaning', (await page.locator('[data-testid=word-zh]').textContent().catch(() => '')) === '自信')
-  await page.screenshot({ path: 'screenshots/desktop-13-offline-word.png' })
+  await page.screenshot({ path: (process.env.SHOT_DIR||'screenshots')+'/desktop-13-offline-word.png' })
   await desktop.setOffline(false)
 }
 

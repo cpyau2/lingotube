@@ -1,0 +1,18 @@
+import { chromium } from 'playwright-core'
+const U = process.argv[2]
+const b = await chromium.launch({ executablePath: '/usr/bin/google-chrome' })
+const ctx = await b.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, locale: 'zh-HK' })
+const p = await ctx.newPage()
+const errs = []; p.on('console', m => m.type() === 'error' && errs.push(m.text())); p.on('pageerror', e => errs.push(e.message))
+await p.goto(U + '/#/'); await p.waitForTimeout(3000)
+const cdp = await ctx.newCDPSession(p)
+const inst = await cdp.send('Page.getInstallabilityErrors')
+const man = await cdp.send('Page.getAppManifest')
+console.log('installabilityErrors:', JSON.stringify(inst.installabilityErrors), '| manifest url:', man.url, '| manifest errors:', JSON.stringify(man.errors))
+console.log('sw:', await p.evaluate(async () => { const r = await navigator.serviceWorker.ready; return r.scope + ' ' + (r.active && r.active.state) }))
+await p.click('[data-testid=video-card]'); await p.waitForSelector('[data-testid=cue]')
+await p.waitForTimeout(2500)
+await p.locator('[data-idx="14"]').click({ position: { x: 30, y: 10 } }); await p.waitForTimeout(1500)
+await p.screenshot({ path: 'screenshots/phone-deployed-watch.png' })
+console.log('cues', await p.locator('[data-testid=cue]').count(), 'zh', await p.locator('[data-testid=cue] [lang=zh-Hant]').count(), 'console errors', JSON.stringify(errs))
+await b.close()

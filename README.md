@@ -63,6 +63,13 @@ node scripts/e2e.mjs                       # headless Chrome (CHROME_PATH=... to
 - Demo video with real English captions + Traditional Chinese translation (TED-Ed "3 tips to boost your confidence")
 - Visible “coming soon” stubs: sentence structure, exercises, shadowing, topic collections
 
+## Deploy (unlisted, Cloudflare Worker)
+
+```bash
+npm run build && node deploy/build-worker.mjs   # bundles dist/ into deploy/worker.js + deploy/deploy-code.js
+```
+`deploy-code.js` is an async arrow function for the Cloudflare connector `execute` tool (PUTs Worker script `lingotube`, then enable its workers.dev subdomain). Live at https://lingotube.hackerkurumi.workers.dev (noindex).
+
 ## Roadmap
 
 - **M2** – AI provider wired in: sentence-structure explanation + translation of imported English-only subtitles; AI settings test button

@@ -4,3 +4,4 @@ tmp
 dev-dist
 *.log
 *.tsbuildinfo
+deploy/deploy-code.js
