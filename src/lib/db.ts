@@ -19,6 +19,17 @@ class LingoDB extends Dexie {
       dict: 'key',
       kv: 'key',
     })
+    // v2: add AI caches
+    this.version(2).stores({
+      videos: 'id, createdAt',
+      prefs: 'id',
+      words: '++id, word, videoId, dueAt, createdAt',
+      sentences: '++id, videoId, start, dueAt, createdAt',
+      dict: 'key',
+      kv: 'key',
+    }).upgrade((tx) => {
+      // no migration needed, just add kv entries
+    })
   }
 }
 

@@ -8,7 +8,9 @@ import { speak } from '../lib/tts'
 import { newSrs } from '../lib/srs'
 import type { Cue, SentenceRec, VideoPrefs, VideoRec } from '../lib/types'
 import WordSheet, { type WordCtx } from '../components/WordSheet'
-import { SoonPanel } from '../components/Page'
+import { StructurePanel } from '../components/StructurePanel'
+import { ExercisePanel } from '../components/ExercisePanel'
+import { ShadowPanel } from '../components/ShadowPanel'
 
 const WORD_RE = /([A-Za-z]+(?:['’][A-Za-z]+)*(?:-[A-Za-z]+)*)/g
 const RATES = [0.75, 1, 1.25, 1.5]
@@ -54,7 +56,7 @@ const CueRow = memo(function CueRow(props: {
           onClick={(e) => { e.stopPropagation(); props.onSave(idx) }}
           className={`text-lg leading-none p-1 rounded ${saved ? 'text-amber-300' : 'text-slate-500 hover:text-slate-200'}`}>{saved ? '★' : '☆'}</button>
         <button aria-label="朗讀" title="朗讀" onClick={(e) => { e.stopPropagation(); speak(cue.en) }} className="text-sm leading-none p-1 text-slate-500 hover:text-slate-200">🔊</button>
-        <button aria-label="句子結構" title="句子結構（即將推出）" onClick={(e) => { e.stopPropagation(); props.onStructure(idx) }} className="text-sm leading-none p-1 text-slate-500 hover:text-slate-200">🧩</button>
+        <button aria-label="句子結構" title="句子結構" onClick={(e) => { e.stopPropagation(); props.onStructure(idx) }} className="text-sm leading-none p-1 text-slate-500 hover:text-slate-200">🧩</button>
       </div>
     </div>
   )
@@ -161,9 +163,9 @@ export default function Watch() {
   ]
   const tabs: { k: Tab; label: string; soon?: boolean }[] = [
     { k: 'subs', label: '字幕' },
-    { k: 'structure', label: '句型', soon: true },
-    { k: 'exercise', label: '練習', soon: true },
-    { k: 'shadow', label: '跟讀', soon: true },
+    { k: 'structure', label: '句型' },
+    { k: 'exercise', label: '練習' },
+    { k: 'shadow', label: '跟讀' },
   ]
   const curCue = structIdx != null ? video.cues[structIdx] : null
 
@@ -242,14 +244,31 @@ export default function Watch() {
         )}
         {tab === 'structure' && (
           <div className="p-4 space-y-3 scroll-y">
-            {curCue && <div className="card p-3 text-sm"><div className="text-slate-200">{curCue.en}</div>{curCue.zh && <div className="text-slate-400 mt-1">{curCue.zh}</div>}</div>}
-            <SoonPanel icon="🧩" title="句子結構解釋" milestone="M2">
-              逐句拆解主語、動詞、子句與文法重點，並用繁體中文說明。需要 AI 服務（在「設定」輸入 API key）。
-            </SoonPanel>
+            {curCue ? (
+              <>
+                <div className="card p-3 text-sm">
+                  <div className="text-slate-200">{curCue.en}</div>
+                  {curCue.zh && <div className="text-slate-400 mt-1">{curCue.zh}</div>}
+                </div>
+                <StructurePanel sentence={curCue.en} />
+              </>
+            ) : (
+              <div className="card p-4 text-center text-slate-400 text-sm">
+                點擊字幕列右側的 🧩 按鈕查看句型解釋
+              </div>
+            )}
           </div>
         )}
-        {tab === 'exercise' && <div className="p-4"><SoonPanel icon="📝" title="練習題生成" milestone="M3">從這部影片自動出填充、選擇、排序、翻譯題。</SoonPanel></div>}
-        {tab === 'shadow' && <div className="p-4"><SoonPanel icon="🎙️" title="AI 跟讀練習" milestone="M4">逐句跟讀並用語音辨識評分（發音、流暢度、漏字）。</SoonPanel></div>}
+        {tab === 'exercise' && (
+          <div className="p-4 scroll-y">
+            <ExercisePanel videoId={id} cues={video.cues} />
+          </div>
+        )}
+        {tab === 'shadow' && (
+          <div className="p-4 scroll-y">
+            <ShadowPanel cues={video.cues} currentIdx={active} />
+          </div>
+        )}
       </section>
 
       {wordCtx && <WordSheet ctx={wordCtx} onClose={closeWord} />}

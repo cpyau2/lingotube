@@ -131,8 +131,45 @@ export class OpenAICompatibleProvider implements AIProvider {
   }
 }
 
+export class WorkersAIProvider implements AIProvider {
+  id = 'workers-ai'
+  label = 'Cloudflare Workers AI'
+  available = true
+
+  private async post(method: string, data: any): Promise<any> {
+    const r = await fetch('/api/ai', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ method, data }),
+    })
+    if (!r.ok) throw new Error(`AI 服務錯誤 ${r.status}`)
+    return r.json()
+  }
+
+  async translate(lines: string[]): Promise<string[]> {
+    return this.post('translate', { lines, target: 'zh-Hant' })
+  }
+
+  async explainSentence(sentence: string): Promise<SentenceExplanation> {
+    return this.post('explainSentence', { sentence })
+  }
+
+  async generateExercises(cues: { en: string; zh?: string }[], n: number): Promise<Exercise[]> {
+    return this.post('generateExercises', { cues, n })
+  }
+
+  async groupTopics(items: { id: string; text: string }[]): Promise<TopicGroup[]> {
+    return this.post('groupTopics', { items })
+  }
+}
+
 export async function getProvider(): Promise<AIProvider> {
   const s = await loadAISettings()
   if (s.provider === 'openai-compatible' && s.apiKey) return new OpenAICompatibleProvider(s)
+  // Try Workers AI as default fallback
+  try {
+    const test = await fetch('/api/ai', { method: 'HEAD' })
+    if (test.ok) return new WorkersAIProvider()
+  } catch { /* no Workers AI available */ }
   return new NoAIProvider()
 }

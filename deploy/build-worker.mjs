@@ -21,7 +21,8 @@ function add(p) {
 }
 walk(DIST)
 const captionsSrc = fs.readFileSync('worker/captions.js', 'utf8').replace(/^export /gm, '')
-const worker = captionsSrc + `\nconst FILES = ${JSON.stringify(files)};
+const aiSrc = fs.readFileSync('worker/ai.js', 'utf8').replace(/^export /gm, '')
+const worker = captionsSrc + '\n' + aiSrc + `\nconst FILES = ${JSON.stringify(files)};
 const cache = new Map();
 function body(p) {
   const f = FILES[p];
@@ -31,19 +32,22 @@ function body(p) {
 }
 export default {
   async fetch(req, env) {
-    if (req.method !== 'GET' && req.method !== 'HEAD' && new URL(req.url).pathname !== '/api/captions') return new Response('Method Not Allowed', { status: 405 });
-    let p = new URL(req.url).pathname;
+    const p = new URL(req.url).pathname;
+    const isApiRoute = p === '/api/captions' || p === '/api/ai';
+    if (req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'POST') return new Response('Method Not Allowed', { status: 405 });
     if (p === '/api/captions') return req.method === 'GET' ? handleCaptions(req, env) : new Response('Method Not Allowed', { status: 405 });
-    if (p === '/') p = '/index.html';
+    if (p === '/api/ai') return handleAI(req, env);
+    if (req.method !== 'GET' && req.method !== 'HEAD') return new Response('Method Not Allowed', { status: 405 });
+    let fp = p === '/' ? '/index.html' : p;
     let status = 200;
-    if (!FILES[p]) {
-      if (/\\.[a-z0-9]+$/i.test(p)) return new Response('Not found', { status: 404, headers: { 'content-type': 'text/plain' } });
-      p = '/index.html'; // SPA fallback
+    if (!FILES[fp]) {
+      if (/\\.[a-z0-9]+$/i.test(fp)) return new Response('Not found', { status: 404, headers: { 'content-type': 'text/plain' } });
+      fp = '/index.html'; // SPA fallback
     }
-    const f = FILES[p];
+    const f = FILES[fp];
     const h = { 'content-type': f.t, 'cache-control': f.c, 'x-content-type-options': 'nosniff', 'referrer-policy': 'strict-origin-when-cross-origin', 'x-robots-tag': 'noindex, nofollow' };
-    if (p === '/sw.js') h['service-worker-allowed'] = '/';
-    return new Response(req.method === 'HEAD' ? null : body(p), { status, headers: h });
+    if (fp === '/sw.js') h['service-worker-allowed'] = '/';
+    return new Response(req.method === 'HEAD' ? null : body(fp), { status, headers: h });
   },
 };
 `

@@ -9,6 +9,8 @@ export default function Settings() {
   const [ai, setAi] = useState<AISettings>(DEFAULT_AI_SETTINGS)
   const [proxy, setProxy] = useState(DEFAULT_PROXY)
   const [msg, setMsg] = useState('')
+  const [testMsg, setTestMsg] = useState('')
+  const [testing, setTesting] = useState(false)
   const [installEvt, setInstallEvt] = useState<any>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -24,6 +26,32 @@ export default function Settings() {
     await saveAISettings(ai); await db.kv.put({ key: 'proxy-url', value: proxy })
     setMsg('已儲存（只存喺這部裝置）'); setTimeout(() => setMsg(''), 2500)
   }
+  
+  const testAI = async () => {
+    setTesting(true)
+    setTestMsg('')
+    try {
+      await saveAISettings(ai)
+      const { getProvider } = await import('../lib/ai/provider')
+      const provider = await getProvider()
+      if (!provider.available) {
+        setTestMsg('❌ 未設定 AI 服務')
+        return
+      }
+      const result = await provider.translate(['Hello world'], 'zh-Hant')
+      if (result && result.length > 0) {
+        setTestMsg(`✅ 連線成功！（${provider.label}）`)
+      } else {
+        setTestMsg('❌ AI 回應異常')
+      }
+    } catch (e: any) {
+      setTestMsg(`❌ 連線失敗：${e.message || e}`)
+    } finally {
+      setTesting(false)
+      setTimeout(() => setTestMsg(''), 5000)
+    }
+  }
+  
   const doExport = async () => {
     const blob = new Blob([JSON.stringify(await exportAll(), null, 1)], { type: 'application/json' })
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `lingotube-backup-${new Date().toISOString().slice(0, 10)}.json`; a.click()
@@ -44,8 +72,8 @@ export default function Settings() {
         )}
 
         <div className="card p-4 space-y-3" data-testid="ai-settings">
-          <div className="font-semibold">AI 服務 <span className="soon">M2 起啟用</span></div>
-          <p className="text-sm text-slate-400">用於翻譯、句型解釋、練習題與主題分組。未設定時 App 仍可用（內建示範字幕＋離線字庫）。Key 只儲存喺你這部裝置的瀏覽器，不會上傳。</p>
+          <div className="font-semibold">AI 服務</div>
+          <p className="text-sm text-slate-400">用於翻譯、句型解釋、練習題與主題分組。未設定時會使用 Cloudflare Workers AI（免費但功能較簡單）。BYOK 可獲得更好效果。Key 只儲存喺你這部裝置的瀏覽器，不會上傳。</p>
           <label className="block text-sm space-y-1"><span className="text-slate-300">服務類型</span>
             <select value={ai.provider} onChange={(e) => setAi({ ...ai, provider: e.target.value as AISettings['provider'] })}>
               <option value="none">不使用 AI</option>
@@ -58,6 +86,12 @@ export default function Settings() {
               <label className="block text-sm space-y-1"><span className="text-slate-300">API key</span><input type="password" autoComplete="off" value={ai.apiKey} onChange={(e) => setAi({ ...ai, apiKey: e.target.value })} placeholder="sk-…" /></label>
             </>
           )}
+          <div className="flex gap-2">
+            <button className="btn ghost" onClick={testAI} disabled={testing} data-testid="test-ai">
+              {testing ? '測試中…' : '測試連線'}
+            </button>
+            {testMsg && <span className={`text-sm ${testMsg.startsWith('✅') ? 'text-emerald-300' : 'text-rose-300'}`}>{testMsg}</span>}
+          </div>
         </div>
 
         <div className="card p-4 space-y-3">
@@ -87,7 +121,10 @@ export default function Settings() {
           {!ttsSupported() && <div className="text-sm text-amber-300">這個瀏覽器不支援語音合成。</div>}
         </div>
 
-        <SoonPanel icon="🎙️" title="語音辨識（跟讀）" milestone="M4">會用瀏覽器的 SpeechRecognition（Chrome / Safari），不支援的瀏覽器會提供備用方案。</SoonPanel>
+        <div className="card p-4 space-y-2">
+          <div className="font-semibold">🎙️ 語音辨識（跟讀）</div>
+          <p className="text-sm text-slate-400">使用瀏覽器的 SpeechRecognition API（Chrome / Safari）。不支援的瀏覽器會顯示備用方案。</p>
+        </div>
       </div>
     </Page>
   )

@@ -62,6 +62,43 @@ node scripts/e2e.mjs                       # headless Chrome (CHROME_PATH=... to
 - 複習: spaced-repetition flashcards (cloze for words, zh→en for sentences), keyboard shortcuts
 - Demo video with real English captions + Traditional Chinese translation (TED-Ed "3 tips to boost your confidence")
 - Visible “coming soon” stubs: sentence structure, exercises, shadowing, topic collections
+- Video deletion: single-delete (× button) and batch-delete (選取 mode) on 我的影片 page
+
+## Milestone 2 (done)
+
+- **AI Settings**: Enabled AI configuration in Settings page with test button (測試連線)
+- **Sentence Structure**: Watch 「句型」tab now functional - click 🧩 on any cue to see:
+  - Structure analysis (e.g., "Subject + Verb + Object")
+  - Breakdown with role labels and Traditional Chinese glosses
+  - Grammar notes in Traditional Chinese
+  - Translation
+- **Workers AI Integration**: Default AI provider via `/api/ai` route using Cloudflare Workers AI (@cf/meta/llama-3.1-8b-instruct)
+- **OpenAI Compatible**: BYOK support for OpenAI, OpenRouter, Groq, Ollama, etc.
+- **Caching**: Sentence explanations cached in IndexedDB to avoid repeat AI calls
+
+## Milestone 3 (done)
+
+- **Topics Page**: Auto-group saved words, sentences, and videos by theme (e.g., "心理·自信", "科技", "日常對話")
+  - Generate topics button with AI
+  - Cached results persist in IndexedDB
+  - Click items to navigate to source (video/saved page)
+- **Exercise Generation**: Watch 「練習」tab generates practice exercises:
+  - Multiple types: cloze (填充), multiple-choice (選擇), translate (翻譯), order (排序)
+  - Interactive checking with explanations
+  - Cached per video
+  - Regenerate button
+- Both features work with Workers AI or BYOK
+
+## Milestone 4 (done)
+
+- **Shadowing/Speech Practice**: Watch 「跟讀」tab with Web SpeechRecognition:
+  - Play audio of current sentence
+  - Record user speech via browser SpeechRecognition API
+  - Score accuracy (0-100%) using Levenshtein distance
+  - Show recognized transcript and missed words
+  - Navigate through sentences (prev/next)
+  - Graceful fallback message for unsupported browsers (Chrome/Safari required)
+
 
 ## Deploy (unlisted, Cloudflare Worker)
 
@@ -72,15 +109,53 @@ npm run build && node deploy/build-worker.mjs   # bundles dist/ into deploy/work
 
 ## Roadmap
 
-- **M2** – AI provider wired in: sentence-structure explanation + translation of imported English-only subtitles; AI settings test button
-- **M3** – Topic collections (auto-group saved words/sentences + current video) and practice-exercise generation
-- **M4** – Shadowing / follow-along reading with scoring (SpeechRecognition + fallback)
-- **M5** – Deploy (Cloudflare Pages/Workers), HTTPS install on phones, optional sync
+- ✅ **M1** – Core video player, subtitles, word lookup, vocab bank, SRS review
+- ✅ **M2** – AI sentence structure, Workers AI integration, BYOK support
+- ✅ **M3** – Topic grouping, exercise generation
+- ✅ **M4** – Shadowing with speech recognition
+- **M5** – Enhanced deployment, optional cloud sync
+
+## AI Configuration
+
+LingoTube supports three AI modes:
+
+### 1. Workers AI (Default, No Setup Required)
+
+When deployed to Cloudflare Workers with the `AI` binding, the app automatically uses Workers AI via the `/api/ai` endpoint. This provides:
+- **Model**: `@cf/meta/llama-3.1-8b-instruct`
+- **Features**: Sentence structure, topic grouping, exercise generation
+- **Cost**: Free (included in Cloudflare Workers AI free tier)
+- **Limitations**: Smaller model, may be less accurate than GPT-4 class models
+
+### 2. OpenAI Compatible (BYOK)
+
+For better results, configure your own API key in Settings:
+1. Go to Settings → AI 服務
+2. Select "OpenAI 相容"
+3. Enter Base URL (e.g., `https://api.openai.com/v1`)
+4. Enter Model (e.g., `gpt-4o-mini`)
+5. Enter API Key
+6. Click 測試連線 to verify
+
+Supports:
+- OpenAI (gpt-4o, gpt-4o-mini, etc.)
+- OpenRouter (access to Claude, Gemini, etc.)
+- Groq (fast inference)
+- Ollama (local models)
+- LM Studio (local)
+
+### 3. No AI Mode
+
+Select "不使用 AI" in Settings. The app remains fully functional with:
+- Manual subtitle import
+- Offline dictionary
+- All non-AI features (video playback, vocab bank, SRS review)
 
 ## Notes
 
 - Demo video © TED-Ed (CC BY-NC-ND); English captions are TED-Ed's, the Chinese translation was written for this project.
 - API keys never leave the device and are excluded from JSON exports.
+- AI responses are cached in IndexedDB to minimize API calls.
 
 ## 自動抓字幕 (`GET /api/captions?v=<11-char id>`)
 

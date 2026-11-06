@@ -14,7 +14,7 @@ const nav = [
   { to: '/', label: '首頁', icon: '🏠', end: true },
   { to: '/saved', label: '生字庫', icon: '📚' },
   { to: '/review', label: '複習', icon: '🧠', badge: true },
-  { to: '/topics', label: '主題', icon: '🗂️', soon: true },
+  { to: '/topics', label: '主題', icon: '🗂️' },
   { to: '/settings', label: '設定', icon: '⚙️' },
 ]
 
@@ -45,7 +45,6 @@ export default function App() {
             className={({ isActive }) => `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm ${isActive ? 'bg-sky-500/15 text-sky-300 font-semibold' : 'text-slate-300 hover:bg-panel2'}`}>
             <span>{n.icon}</span><span>{n.label}</span>
             {n.badge && due > 0 && <span className="ml-auto text-xs bg-rose-500 text-white rounded-full px-1.5">{due}</span>}
-            {n.soon && <span className="soon ml-auto">即將推出</span>}
           </NavLink>
         ))}
       </aside>
