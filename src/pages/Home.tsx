@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db } from '../lib/db'
+import { db, deleteVideo, deleteVideos } from '../lib/db'
 import { mergeBilingual, parseSubs, parseSubtitleText, parseYouTubeId, fmtTime } from '../lib/subs'
 import { fetchAutoCaptions } from '../lib/autoCaptions'
 import { fetchViaProxy, DEFAULT_PROXY } from '../lib/captionsProxy'
@@ -120,27 +120,142 @@ export default function Home() {
   const videos = useLiveQuery(() => db.videos.orderBy('createdAt').reverse().toArray(), [])
   const nav = useNavigate()
   const [adding, setAdding] = useState(false)
+  const [selectMode, setSelectMode] = useState(false)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [deleting, setDeleting] = useState<string | null>(null)
+
+  const toggleSelect = (id: string) => {
+    const next = new Set(selected)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    setSelected(next)
+  }
+
+  const handleDeleteOne = async (id: string) => {
+    if (!deleting) return
+    try {
+      await deleteVideo(id)
+      setDeleting(null)
+    } catch (e: any) {
+      alert('刪除失敗：' + (e?.message ?? e))
+    }
+  }
+
+  const handleDeleteBatch = async () => {
+    if (selected.size === 0) return
+    if (!confirm(`確定要刪除 ${selected.size} 個影片？所有相關嘅生字同句子都會一併刪除，無法復原。`)) return
+    try {
+      await deleteVideos(Array.from(selected))
+      setSelected(new Set())
+      setSelectMode(false)
+    } catch (e: any) {
+      alert('批次刪除失敗：' + (e?.message ?? e))
+    }
+  }
+
+  const exitSelectMode = () => {
+    setSelectMode(false)
+    setSelected(new Set())
+  }
 
   return (
-    <Page title="我的影片" right={<button className="btn ghost" onClick={() => setAdding((a) => !a)}>{adding ? '收起' : '＋ 加影片'}</button>}>
+    <Page
+      title="我的影片"
+      right={
+        selectMode ? (
+          <div className="flex gap-2">
+            <button className="btn ghost text-sm" onClick={exitSelectMode}>取消</button>
+            <button
+              className="btn text-sm bg-rose-600 hover:bg-rose-700 disabled:opacity-50"
+              disabled={selected.size === 0}
+              onClick={handleDeleteBatch}
+            >
+              刪除 {selected.size > 0 ? `(${selected.size})` : ''}
+            </button>
+          </div>
+        ) : (
+          <div className="flex gap-2">
+            {videos && videos.length > 0 && (
+              <button className="btn ghost text-sm" onClick={() => setSelectMode(true)}>選取</button>
+            )}
+            <button className="btn ghost" onClick={() => setAdding((a) => !a)}>{adding ? '收起' : '＋ 加影片'}</button>
+          </div>
+        )
+      }
+    >
       <p className="text-slate-400 text-sm -mt-3 mb-5">用 YouTube 學英文：中英雙語字幕、點字查詞、生字庫、間隔重複複習。全部資料存喺你部機，無需登入。</p>
       {adding && <div className="mb-5"><AddVideo onDone={(id) => nav(`/watch/${id}`)} /></div>}
       <div className="grid sm:grid-cols-2 gap-4" data-testid="video-list">
         {videos?.map((v) => (
-          <Link key={v.id} to={`/watch/${v.id}`} className="card overflow-hidden group hover:border-sky-500/60 transition-colors" data-testid="video-card">
-            <div className="relative aspect-video bg-gradient-to-br from-slate-800 to-slate-900">
-              <img src={`https://i.ytimg.com/vi/${v.youtubeId}/hqdefault.jpg`} alt="" loading="lazy" className="absolute inset-0 w-full h-full object-cover" onError={(e) => ((e.target as HTMLImageElement).style.display = 'none')} />
-              <div className="absolute inset-0 grid place-items-center"><div className="w-12 h-12 rounded-full bg-black/55 grid place-items-center text-xl group-hover:bg-sky-500 group-hover:text-black transition-colors">▶</div></div>
-              {v.demo && <span className="absolute top-2 left-2 text-[11px] bg-emerald-500 text-black font-semibold px-2 py-0.5 rounded-full">示範 · 中英字幕</span>}
-              <span className="absolute bottom-2 right-2 text-[11px] bg-black/70 px-1.5 rounded">{v.cues.length ? fmtTime(v.cues.at(-1)!.end) : ''}</span>
-            </div>
-            <div className="p-3">
-              <div className="font-medium leading-snug line-clamp-2">{v.title}</div>
-              <div className="text-xs text-slate-400 mt-1">{v.cues.length} 句字幕 · {v.cues.some((c) => c.zh) ? '中英雙語' : '只有英文'}</div>
-            </div>
-          </Link>
+          <div key={v.id} className="relative" data-testid="video-card">
+            {selectMode ? (
+              <button
+                onClick={() => toggleSelect(v.id)}
+                className={`card overflow-hidden w-full text-left transition-all ${
+                  selected.has(v.id) ? 'border-sky-500 bg-sky-500/10' : 'hover:border-sky-500/60'
+                }`}
+              >
+                <div className="relative aspect-video bg-gradient-to-br from-slate-800 to-slate-900">
+                  <img src={`https://i.ytimg.com/vi/${v.youtubeId}/hqdefault.jpg`} alt="" loading="lazy" className="absolute inset-0 w-full h-full object-cover" onError={(e) => ((e.target as HTMLImageElement).style.display = 'none')} />
+                  <div className="absolute inset-0 grid place-items-center">
+                    <div className={`w-8 h-8 rounded border-2 ${selected.has(v.id) ? 'bg-sky-500 border-sky-500' : 'bg-black/40 border-white/40'} grid place-items-center text-lg`}>
+                      {selected.has(v.id) && '✓'}
+                    </div>
+                  </div>
+                  {v.demo && <span className="absolute top-2 left-2 text-[11px] bg-emerald-500 text-black font-semibold px-2 py-0.5 rounded-full">示範 · 中英字幕</span>}
+                  <span className="absolute bottom-2 right-2 text-[11px] bg-black/70 px-1.5 rounded">{v.cues.length ? fmtTime(v.cues.at(-1)!.end) : ''}</span>
+                </div>
+                <div className="p-3">
+                  <div className="font-medium leading-snug line-clamp-2">{v.title}</div>
+                  <div className="text-xs text-slate-400 mt-1">{v.cues.length} 句字幕 · {v.cues.some((c) => c.zh) ? '中英雙語' : '只有英文'}</div>
+                </div>
+              </button>
+            ) : (
+              <>
+                <Link to={`/watch/${v.id}`} className="card overflow-hidden group hover:border-sky-500/60 transition-colors block">
+                  <div className="relative aspect-video bg-gradient-to-br from-slate-800 to-slate-900">
+                    <img src={`https://i.ytimg.com/vi/${v.youtubeId}/hqdefault.jpg`} alt="" loading="lazy" className="absolute inset-0 w-full h-full object-cover" onError={(e) => ((e.target as HTMLImageElement).style.display = 'none')} />
+                    <div className="absolute inset-0 grid place-items-center"><div className="w-12 h-12 rounded-full bg-black/55 grid place-items-center text-xl group-hover:bg-sky-500 group-hover:text-black transition-colors">▶</div></div>
+                    {v.demo && <span className="absolute top-2 left-2 text-[11px] bg-emerald-500 text-black font-semibold px-2 py-0.5 rounded-full">示範 · 中英字幕</span>}
+                    <span className="absolute bottom-2 right-2 text-[11px] bg-black/70 px-1.5 rounded">{v.cues.length ? fmtTime(v.cues.at(-1)!.end) : ''}</span>
+                  </div>
+                  <div className="p-3">
+                    <div className="font-medium leading-snug line-clamp-2">{v.title}</div>
+                    <div className="text-xs text-slate-400 mt-1">{v.cues.length} 句字幕 · {v.cues.some((c) => c.zh) ? '中英雙語' : '只有英文'}</div>
+                  </div>
+                </Link>
+                <button
+                  className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/70 hover:bg-rose-600 grid place-items-center text-lg transition-colors z-10"
+                  onClick={(e) => {
+                    e.preventDefault()
+                    setDeleting(v.id)
+                  }}
+                  title="刪除影片"
+                >
+                  ×
+                </button>
+              </>
+            )}
+          </div>
         ))}
       </div>
+
+      {deleting && (
+        <div className="fixed inset-0 bg-black/60 grid place-items-center z-50 p-4" onClick={() => setDeleting(null)}>
+          <div className="card max-w-sm w-full p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div className="font-semibold text-lg">確定要刪除影片？</div>
+            <p className="text-slate-300 text-sm">
+              所有相關嘅生字同句子都會一併刪除，無法復原。
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button className="btn ghost" onClick={() => setDeleting(null)}>取消</button>
+              <button className="btn bg-rose-600 hover:bg-rose-700" onClick={() => handleDeleteOne(deleting)}>
+                確定刪除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </Page>
   )
 }

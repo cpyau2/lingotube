@@ -67,3 +67,23 @@ export async function importAll(data: any) {
     }
   })
 }
+
+export async function deleteVideo(videoId: string) {
+  await db.transaction('rw', [db.videos, db.prefs, db.words, db.sentences], async () => {
+    await db.videos.delete(videoId)
+    await db.prefs.delete(videoId)
+    await db.words.where('videoId').equals(videoId).delete()
+    await db.sentences.where('videoId').equals(videoId).delete()
+  })
+}
+
+export async function deleteVideos(videoIds: string[]) {
+  await db.transaction('rw', [db.videos, db.prefs, db.words, db.sentences], async () => {
+    await db.videos.bulkDelete(videoIds)
+    await db.prefs.bulkDelete(videoIds)
+    for (const videoId of videoIds) {
+      await db.words.where('videoId').equals(videoId).delete()
+      await db.sentences.where('videoId').equals(videoId).delete()
+    }
+  })
+}
