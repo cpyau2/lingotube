@@ -72,7 +72,7 @@ node scripts/e2e.mjs                       # headless Chrome (CHROME_PATH=... to
   - Breakdown with role labels and Traditional Chinese glosses
   - Grammar notes in Traditional Chinese
   - Translation
-- **Workers AI Integration**: Default AI provider via `/api/ai` route using Cloudflare Workers AI (@cf/meta/llama-3.1-8b-instruct)
+- **Workers AI Integration**: Default AI provider via `/api/ai` route using Cloudflare Workers AI (@cf/meta/llama-3.1-8b-instruct-fast)
 - **OpenAI Compatible**: BYOK support for OpenAI, OpenRouter, Groq, Ollama, etc.
 - **Caching**: Sentence explanations cached in IndexedDB to avoid repeat AI calls
 
@@ -122,7 +122,7 @@ LingoTube supports three AI modes:
 ### 1. Workers AI (Default, No Setup Required)
 
 When deployed to Cloudflare Workers with the `AI` binding, the app automatically uses Workers AI via the `/api/ai` endpoint. This provides:
-- **Model**: `@cf/meta/llama-3.1-8b-instruct`
+- **Model**: `@cf/meta/llama-3.1-8b-instruct-fast`
 - **Features**: Sentence structure, topic grouping, exercise generation
 - **Cost**: Free (included in Cloudflare Workers AI free tier)
 - **Limitations**: Smaller model, may be less accurate than GPT-4 class models

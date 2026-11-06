@@ -29,7 +29,7 @@
   - POST `/api/ai` endpoint
   - HEAD `/api/ai` for availability check
   - Methods: translate, explainSentence, generateExercises, groupTopics
-  - Model: `@cf/meta/llama-3.1-8b-instruct`
+  - Model: `@cf/meta/llama-3.1-8b-instruct-fast`
   - JSON extraction with fallback parsing
 - ✅ Updated `deploy/build-worker.mjs` to include AI module
 - ✅ Created `WorkersAIProvider` class in provider.ts
@@ -148,7 +148,7 @@ POST /api/ai → { method, data }
 - ❌ Firefox (not supported - shows fallback UI)
 
 ### Workers AI Model
-- Model: `@cf/meta/llama-3.1-8b-instruct`
+- Model: `@cf/meta/llama-3.1-8b-instruct-fast`
 - Temperature: 0.2
 - Max tokens: 2048
 - Response: JSON extracted with regex fallback
