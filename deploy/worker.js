@@ -306,7 +306,16 @@ async function chat(env, system, user) {
         temperature: 0.2,
         max_tokens: 2048,
       })
-      return resp.response || ''
+      if (typeof resp === 'string') return resp
+      if (typeof resp?.response === 'string') return resp.response
+      if (Array.isArray(resp?.response)) {
+        return resp.response.map((p) => (typeof p === 'string' ? p : p?.content || p?.text || '')).join('')
+      }
+      if (typeof resp?.result === 'string') return resp.result
+      if (typeof resp?.result?.response === 'string') return resp.result.response
+      // last resort: stringify unknown shapes for debugging upstream parse
+      const fallback = resp?.response ?? resp?.result ?? resp
+      return typeof fallback === 'string' ? fallback : JSON.stringify(fallback ?? '')
     } catch (e) {
       lastErr = e
     }
