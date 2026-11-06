@@ -288,7 +288,7 @@ async function handleCaptions(request, env) {
 // AI service handler for Workers AI (env.AI binding)
 // POST /api/ai with { method, data } -> AI response
 
-const AI_MODELS = [
+const AI_CHAT_MODELS = [
   '@cf/meta/llama-3.1-8b-instruct-fast',
   '@cf/meta/llama-3.1-8b-instruct-fp8',
   '@cf/meta/llama-3.2-3b-instruct',
@@ -296,7 +296,7 @@ const AI_MODELS = [
 
 async function chat(env, system, user) {
   let lastErr
-  for (const model of AI_MODELS) {
+  for (const model of AI_CHAT_MODELS) {
     try {
       const resp = await env.AI.run(model, {
         messages: [
