@@ -58,11 +58,17 @@ async function translate(env, lines, target) {
 }
 
 async function explainSentence(env, sentence) {
-  return jsonChat(
+  const raw = await jsonChat(
     env,
     'You are an English teacher for a Cantonese speaker. Explain the sentence structure. Return JSON {structure, breakdown:[{text,role,zh}], grammarNotes:[string in Traditional Chinese], translationZh}.',
     sentence,
   )
+  if (typeof raw?.grammarNotes === 'string') raw.grammarNotes = [raw.grammarNotes]
+  if (!Array.isArray(raw?.grammarNotes)) raw.grammarNotes = []
+  if (!Array.isArray(raw?.breakdown)) raw.breakdown = []
+  if (typeof raw?.structure !== 'string') raw.structure = String(raw?.structure ?? '')
+  if (typeof raw?.translationZh !== 'string') raw.translationZh = String(raw?.translationZh ?? '')
+  return raw
 }
 
 async function generateExercises(env, cues, n) {

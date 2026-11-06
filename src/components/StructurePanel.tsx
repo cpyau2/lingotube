@@ -94,7 +94,7 @@ export function StructurePanel({ sentence, onError }: Props) {
         <div className="text-slate-200 font-medium">{explanation.structure}</div>
       </div>
 
-      {explanation.breakdown && explanation.breakdown.length > 0 && (
+      {Array.isArray(explanation.breakdown) && explanation.breakdown.length > 0 && (
         <div className="card p-4">
           <div className="text-xs text-slate-500 mb-2">成分拆解</div>
           <div className="flex flex-wrap gap-2">
@@ -109,7 +109,7 @@ export function StructurePanel({ sentence, onError }: Props) {
         </div>
       )}
 
-      {explanation.grammarNotes && explanation.grammarNotes.length > 0 && (
+      {Array.isArray(explanation.grammarNotes) && explanation.grammarNotes.length > 0 && (
         <div className="card p-4">
           <div className="text-xs text-slate-500 mb-2">文法重點</div>
           <ul className="space-y-2">
