@@ -288,16 +288,30 @@ async function handleCaptions(request, env) {
 // AI service handler for Workers AI (env.AI binding)
 // POST /api/ai with { method, data } -> AI response
 
+const AI_MODELS = [
+  '@cf/meta/llama-3.1-8b-instruct-fast',
+  '@cf/meta/llama-3.1-8b-instruct-fp8',
+  '@cf/meta/llama-3.2-3b-instruct',
+]
+
 async function chat(env, system, user) {
-  const resp = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
-    messages: [
-      { role: 'system', content: system },
-      { role: 'user', content: user },
-    ],
-    temperature: 0.2,
-    max_tokens: 2048,
-  })
-  return resp.response || ''
+  let lastErr
+  for (const model of AI_MODELS) {
+    try {
+      const resp = await env.AI.run(model, {
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: user },
+        ],
+        temperature: 0.2,
+        max_tokens: 2048,
+      })
+      return resp.response || ''
+    } catch (e) {
+      lastErr = e
+    }
+  }
+  throw lastErr || new Error('Workers AI failed')
 }
 
 async function jsonChat(env, system, user) {
