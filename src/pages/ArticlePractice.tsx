@@ -6,12 +6,22 @@ import { db } from '../lib/db'
 import { calculatePartProgress } from '../lib/articleParser'
 import type { ArticleScript, ArticlePart, ArticleSentence } from '../lib/types'
 import { newSrs } from '../lib/srs'
+import { calculateDetailedScore, type WordAlignment, type ScoringResult } from '../lib/scoring'
 
 type PlayMode = 'sentence' | 'part'
 
-// Speech synthesis helper
+// Speech synthesis helper - prefer high-quality voices
 function getEnglishVoice(): SpeechSynthesisVoice | null {
   const voices = speechSynthesis.getVoices()
+  
+  // Prefer Google, Natural, or Samantha voices
+  const preferred = voices.find(v => 
+    v.lang.startsWith('en') && 
+    (v.name.includes('Google') || v.name.includes('Natural') || v.name.includes('Samantha'))
+  )
+  if (preferred) return preferred
+  
+  // Fallback to any English voice
   return voices.find(v => v.lang.startsWith('en')) || voices[0] || null
 }
 
@@ -23,24 +33,34 @@ export default function ArticlePractice() {
   const [sentenceIdx, setSentenceIdx] = useState(0)
   const [speed, setSpeed] = useState(1.0)
   const [repeat, setRepeat] = useState(1)
-  const [chunkPause, setChunkPause] = useState(400) // ms
+  const [chunkPauseMode, setChunkPauseMode] = useState(false) // Default OFF
   const [playing, setPlaying] = useState(false)
   const [currentChunk, setCurrentChunk] = useState(-1)
   const [recording, setRecording] = useState(false)
   const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null)
-  const [comparing, setComparing] = useState(false)
-  const [recognizedText, setRecognizedText] = useState('')
-  const [score, setScore] = useState<number | null>(null)
+  const [transcribing, setTranscribing] = useState(false)
+  const [scoringResult, setScoringResult] = useState<ScoringResult | null>(null)
   
+  const audioRef = useRef<HTMLAudioElement | null>(null)
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const recognitionRef = useRef<any>(null)
   const repeatCountRef = useRef(0)
+  const highlightTimerRef = useRef<number | null>(null)
   
   const hasSpeechSynthesis = typeof speechSynthesis !== 'undefined'
   const hasMediaRecorder = typeof MediaRecorder !== 'undefined'
   const hasSpeechRecognition = typeof (window as any).SpeechRecognition !== 'undefined' || 
                                 typeof (window as any).webkitSpeechRecognition !== 'undefined'
+
+  // Load cached recording on mount
+  useEffect(() => {
+    if (!article) return
+    const key = `recording:${article.id}:${partIdx}:${sentenceIdx}`
+    db.recordings.get(key).then(rec => {
+      if (rec?.blob) setRecordedBlob(rec.blob)
+    })
+  }, [article, partIdx, sentenceIdx])
 
   useEffect(() => {
     // Load voices
@@ -49,34 +69,13 @@ export default function ArticlePractice() {
       speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices()
     }
     
-    // Setup recognition
+    // Setup recognition (fallback only)
     if (hasSpeechRecognition) {
       const SpeechRecog = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
       const recognition = new SpeechRecog()
       recognition.lang = 'en-US'
       recognition.continuous = false
       recognition.interimResults = false
-      
-      recognition.onresult = (event: any) => {
-        const transcript = event.results[0][0].transcript
-        setRecognizedText(transcript)
-        
-        // Calculate score
-        if (article && article.parts[partIdx]) {
-          const sentence = article.parts[partIdx].sentences[sentenceIdx]
-          const fullText = sentence.chunks.map(c => c.text).join(' ')
-          const s = calculateScore(fullText, transcript)
-          setScore(s)
-          
-          // Update article stats
-          updateSentenceStats(s)
-        }
-      }
-      
-      recognition.onerror = () => {
-        setRecognizedText('語音辨識失敗')
-      }
-      
       recognitionRef.current = recognition
     }
     
@@ -84,8 +83,15 @@ export default function ArticlePractice() {
       if (utteranceRef.current) {
         speechSynthesis.cancel()
       }
+      if (audioRef.current) {
+        audioRef.current.pause()
+        audioRef.current = null
+      }
       if (recognitionRef.current) {
         try { recognitionRef.current.stop() } catch {}
+      }
+      if (highlightTimerRef.current) {
+        clearTimeout(highlightTimerRef.current)
       }
     }
   }, [hasSpeechSynthesis, hasSpeechRecognition])
@@ -125,24 +131,107 @@ export default function ArticlePractice() {
     await db.articles.put(updated)
   }, [article, partIdx, sentenceIdx])
   
+  // Get or generate TTS audio for a sentence
+  const getTTSAudio = useCallback(async (text: string, voice: string = 'aura-1-en'): Promise<Blob | null> => {
+    const cacheKey = `tts:${text}:${voice}`
+    
+    // Check cache first
+    const cached = await db.audioCache.get(cacheKey)
+    if (cached?.blob) {
+      return cached.blob
+    }
+    
+    // Generate via Worker
+    try {
+      const resp = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text, voice }),
+      })
+      
+      if (!resp.ok) {
+        console.error('TTS failed:', await resp.text())
+        return null
+      }
+      
+      const blob = await resp.blob()
+      
+      // Cache it
+      await db.audioCache.put({
+        key: cacheKey,
+        blob,
+        createdAt: Date.now(),
+      })
+      
+      return blob
+    } catch (e) {
+      console.error('TTS error:', e)
+      return null
+    }
+  }, [])
+  
+  // Approximate chunk highlighting during continuous playback
+  const approximateChunkHighlight = useCallback((sentence: ArticleSentence, duration: number) => {
+    const totalChars = sentence.chunks.reduce((sum, c) => sum + c.text.length, 0)
+    let elapsed = 0
+    
+    sentence.chunks.forEach((chunk, idx) => {
+      const chunkDuration = (chunk.text.length / totalChars) * duration
+      const delay = elapsed
+      
+      highlightTimerRef.current = window.setTimeout(() => {
+        setCurrentChunk(idx)
+      }, delay * 1000)
+      
+      elapsed += chunkDuration
+    })
+    
+    // Clear highlight at end
+    highlightTimerRef.current = window.setTimeout(() => {
+      setCurrentChunk(-1)
+    }, duration * 1000)
+  }, [])
+  
+  // Play sentence with Workers AI TTS + fallback to speechSynthesis
   const playSentence = useCallback(async () => {
-    if (!article || !hasSpeechSynthesis) return
+    if (!article) return
     
     const sentence = article.parts[partIdx].sentences[sentenceIdx]
     if (!sentence) return
     
+    // Stop any existing playback
     speechSynthesis.cancel()
+    if (audioRef.current) {
+      audioRef.current.pause()
+    }
+    if (highlightTimerRef.current) {
+      clearTimeout(highlightTimerRef.current)
+    }
+    
     setPlaying(true)
     setCurrentChunk(-1)
     repeatCountRef.current = 0
     
-    const playOnce = () => {
-      return new Promise<void>((resolve) => {
-        let chunkIndex = 0
-        
-        const playNextChunk = () => {
-          if (chunkIndex >= sentence.chunks.length) {
-            // Sentence complete
+    const fullText = sentence.chunks.map(c => c.text).join(' ')
+    
+    const playOnce = async (): Promise<void> => {
+      // Try Workers AI TTS first
+      const audioBlob = await getTTSAudio(fullText)
+      
+      if (audioBlob && !chunkPauseMode) {
+        // Play via <audio> element with speed control
+        return new Promise<void>((resolve) => {
+          const audio = new Audio(URL.createObjectURL(audioBlob))
+          audio.playbackRate = speed
+          audioRef.current = audio
+          
+          const duration = 0 // Unknown until loaded
+          audio.onloadedmetadata = () => {
+            approximateChunkHighlight(sentence, audio.duration / speed)
+          }
+          
+          audio.onended = () => {
+            URL.revokeObjectURL(audio.src)
             setTimeout(() => {
               repeatCountRef.current++
               const shouldRepeat = repeat === 0 || repeatCountRef.current < repeat
@@ -151,40 +240,136 @@ export default function ArticlePractice() {
               } else {
                 resolve()
               }
-            }, 800) // pause between repeats
-            return
+            }, 800)
           }
           
-          setCurrentChunk(chunkIndex)
-          const chunk = sentence.chunks[chunkIndex]
-          const utterance = new SpeechSynthesisUtterance(chunk.text)
-          utterance.voice = getEnglishVoice()
-          utterance.rate = speed
-          utterance.onend = () => {
-            setTimeout(() => {
-              chunkIndex++
-              playNextChunk()
-            }, chunkPause)
+          audio.onerror = () => {
+            console.error('Audio playback failed, falling back to speechSynthesis')
+            URL.revokeObjectURL(audio.src)
+            // Fallback to speechSynthesis
+            playSpeechSynthesisFull(sentence, fullText).then(resolve)
           }
-          utterance.onerror = () => {
-            chunkIndex++
-            playNextChunk()
-          }
-          utteranceRef.current = utterance
-          speechSynthesis.speak(utterance)
+          
+          audio.play().catch(() => {
+            console.error('Audio play failed, falling back to speechSynthesis')
+            URL.revokeObjectURL(audio.src)
+            playSpeechSynthesisFull(sentence, fullText).then(resolve)
+          })
+        })
+      } else if (hasSpeechSynthesis) {
+        // Fallback to speechSynthesis
+        if (chunkPauseMode) {
+          // Chunk-by-chunk with pauses
+          return playChunkByChunk(sentence)
+        } else {
+          // Full sentence at once
+          return playSpeechSynthesisFull(sentence, fullText)
         }
-        
-        playNextChunk()
-      })
+      } else {
+        return Promise.resolve()
+      }
     }
     
     await playOnce()
     setPlaying(false)
     setCurrentChunk(-1)
-  }, [article, partIdx, sentenceIdx, speed, repeat, chunkPause, hasSpeechSynthesis])
+  }, [article, partIdx, sentenceIdx, speed, repeat, chunkPauseMode, hasSpeechSynthesis, getTTSAudio, approximateChunkHighlight])
+  
+  // Play full sentence with speechSynthesis
+  const playSpeechSynthesisFull = useCallback((sentence: ArticleSentence, text: string): Promise<void> => {
+    return new Promise<void>((resolve) => {
+      const utterance = new SpeechSynthesisUtterance(text)
+      utterance.voice = getEnglishVoice()
+      utterance.rate = speed
+      
+      // Approximate chunk highlighting via character boundary events
+      utterance.onboundary = (e) => {
+        if (e.name === 'word') {
+          const charIndex = e.charIndex
+          let cumulative = 0
+          for (let i = 0; i < sentence.chunks.length; i++) {
+            cumulative += sentence.chunks[i].text.length + 1 // +1 for space
+            if (charIndex < cumulative) {
+              setCurrentChunk(i)
+              break
+            }
+          }
+        }
+      }
+      
+      utterance.onend = () => {
+        setTimeout(() => {
+          repeatCountRef.current++
+          const shouldRepeat = repeat === 0 || repeatCountRef.current < repeat
+          if (shouldRepeat) {
+            playSpeechSynthesisFull(sentence, text).then(resolve)
+          } else {
+            resolve()
+          }
+        }, 800)
+      }
+      
+      utterance.onerror = () => {
+        resolve()
+      }
+      
+      utteranceRef.current = utterance
+      speechSynthesis.speak(utterance)
+    })
+  }, [speed, repeat])
+  
+  // Play chunk-by-chunk with pauses (old behavior, now optional)
+  const playChunkByChunk = useCallback((sentence: ArticleSentence): Promise<void> => {
+    return new Promise<void>((resolve) => {
+      let chunkIndex = 0
+      const chunkPause = 400 // ms
+      
+      const playNextChunk = () => {
+        if (chunkIndex >= sentence.chunks.length) {
+          setTimeout(() => {
+            repeatCountRef.current++
+            const shouldRepeat = repeat === 0 || repeatCountRef.current < repeat
+            if (shouldRepeat) {
+              playChunkByChunk(sentence).then(resolve)
+            } else {
+              resolve()
+            }
+          }, 800)
+          return
+        }
+        
+        setCurrentChunk(chunkIndex)
+        const chunk = sentence.chunks[chunkIndex]
+        const utterance = new SpeechSynthesisUtterance(chunk.text)
+        utterance.voice = getEnglishVoice()
+        utterance.rate = speed
+        utterance.onend = () => {
+          setTimeout(() => {
+            chunkIndex++
+            playNextChunk()
+          }, chunkPause)
+        }
+        utterance.onerror = () => {
+          chunkIndex++
+          playNextChunk()
+        }
+        utteranceRef.current = utterance
+        speechSynthesis.speak(utterance)
+      }
+      
+      playNextChunk()
+    })
+  }, [speed, repeat])
   
   const stopPlaying = () => {
     speechSynthesis.cancel()
+    if (audioRef.current) {
+      audioRef.current.pause()
+      audioRef.current = null
+    }
+    if (highlightTimerRef.current) {
+      clearTimeout(highlightTimerRef.current)
+    }
     setPlaying(false)
     setCurrentChunk(-1)
   }
@@ -198,24 +383,28 @@ export default function ArticlePractice() {
       const chunks: Blob[] = []
       
       recorder.ondataavailable = (e) => chunks.push(e.data)
-      recorder.onstop = () => {
+      recorder.onstop = async () => {
         const blob = new Blob(chunks, { type: 'audio/webm' })
         setRecordedBlob(blob)
         stream.getTracks().forEach(track => track.stop())
+        
+        // Save to IndexedDB
+        if (article) {
+          const key = `recording:${article.id}:${partIdx}:${sentenceIdx}`
+          await db.recordings.put({
+            key,
+            blob,
+            createdAt: Date.now(),
+          })
+        }
+        
+        // Auto-transcribe and score
+        await transcribeAndScore(blob)
       }
       
       mediaRecorderRef.current = recorder
       recorder.start()
       setRecording(true)
-      
-      // Also start recognition
-      if (recognitionRef.current) {
-        setRecognizedText('')
-        setScore(null)
-        try {
-          recognitionRef.current.start()
-        } catch {}
-      }
     } catch (e) {
       alert('無法存取麥克風')
     }
@@ -226,26 +415,77 @@ export default function ArticlePractice() {
       mediaRecorderRef.current.stop()
       setRecording(false)
     }
-    if (recognitionRef.current) {
-      try { recognitionRef.current.stop() } catch {}
-    }
   }
   
-  const playComparison = async () => {
-    if (!article || !recordedBlob) return
+  // Transcribe via Workers AI Whisper, with speechRecognition fallback
+  const transcribeAndScore = async (blob: Blob) => {
+    if (!article) return
     
-    setComparing(true)
+    setTranscribing(true)
+    setScoringResult(null)
+    
+    const sentence = article.parts[partIdx].sentences[sentenceIdx]
+    const fullText = sentence.chunks.map(c => c.text).join(' ')
+    
+    let transcript = ''
+    
+    // Try Workers AI Whisper first
+    try {
+      const formData = new FormData()
+      formData.append('audio', blob, 'recording.webm')
+      
+      const resp = await fetch('/api/stt', {
+        method: 'POST',
+        body: formData,
+      })
+      
+      if (resp.ok) {
+        const data = await resp.json()
+        transcript = data.text || ''
+      }
+    } catch (e) {
+      console.error('Whisper STT failed:', e)
+    }
+    
+    // Fallback to browser SpeechRecognition if Whisper failed and available
+    if (!transcript && hasSpeechRecognition && recognitionRef.current) {
+      try {
+        // Note: SpeechRecognition needs live mic input, can't process recorded blob
+        // So this is limited - but we keep it as a fallback for when recording + recognition happen together
+        // For now, we'll skip this fallback since it won't work with the recorded blob
+        console.log('SpeechRecognition fallback not available for recorded audio')
+      } catch {}
+    }
+    
+    // Calculate score
+    const result = calculateDetailedScore(fullText, transcript)
+    setScoringResult(result)
+    setTranscribing(false)
+    
+    // Update stats
+    await updateSentenceStats(result.score)
+  }
+  
+  const playRecording = () => {
+    if (!recordedBlob) return
+    const audio = new Audio(URL.createObjectURL(recordedBlob))
+    audio.play()
+    audio.onended = () => URL.revokeObjectURL(audio.src)
+  }
+  
+  const playOriginal = async () => {
+    await playSentence()
+  }
+  
+  const playBackToBack = async () => {
+    if (!recordedBlob) return
     
     // Play original
     await playSentence()
     await new Promise(resolve => setTimeout(resolve, 500))
     
     // Play recording
-    const audio = new Audio(URL.createObjectURL(recordedBlob))
-    audio.play()
-    await new Promise(resolve => { audio.onended = resolve })
-    
-    setComparing(false)
+    playRecording()
   }
   
   const nextSentence = () => {
@@ -276,8 +516,7 @@ export default function ArticlePractice() {
   
   const reset = () => {
     setRecordedBlob(null)
-    setRecognizedText('')
-    setScore(null)
+    setScoringResult(null)
     setCurrentChunk(-1)
     stopPlaying()
   }
@@ -360,7 +599,7 @@ export default function ArticlePractice() {
         <div className="card p-4 space-y-4">
           <div className="flex flex-wrap gap-2">
             <button className="btn" onClick={playSentence} disabled={playing || recording}>
-              {playing ? '⏸ 播放中…' : '🔊 播放'}
+              {playing ? '⏸ 播放中…' : '🔊 播放原句'}
             </button>
             {playing && (
               <button className="btn ghost" onClick={stopPlaying}>⏹ 停止</button>
@@ -374,17 +613,27 @@ export default function ArticlePractice() {
                 ⏹ 停止錄音
               </button>
             )}
-            {recordedBlob && !comparing && (
-              <button className="btn ghost" onClick={playComparison}>
-                🔄 對比播放
-              </button>
-            )}
           </div>
+          
+          {/* Recording playback buttons */}
+          {recordedBlob && (
+            <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-700">
+              <button className="btn ghost text-sm" onClick={playRecording}>
+                ▶ 播放我的錄音
+              </button>
+              <button className="btn ghost text-sm" onClick={playOriginal} disabled={playing}>
+                ▶ 播放原句
+              </button>
+              <button className="btn ghost text-sm" onClick={playBackToBack} disabled={playing}>
+                ⇄ 對比播放
+              </button>
+            </div>
+          )}
 
-          <div className="grid grid-cols-3 gap-3 text-sm">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
             <label className="block">
               <span className="text-xs text-slate-400 mb-1 block">速度</span>
-              <select value={speed} onChange={(e) => setSpeed(Number(e.target.value))} className="text-sm">
+              <select value={speed} onChange={(e) => setSpeed(Number(e.target.value))} className="text-sm w-full">
                 <option value={0.6}>0.6×</option>
                 <option value={0.8}>0.8×</option>
                 <option value={1.0}>1.0×</option>
@@ -393,48 +642,74 @@ export default function ArticlePractice() {
             </label>
             <label className="block">
               <span className="text-xs text-slate-400 mb-1 block">重複</span>
-              <select value={repeat} onChange={(e) => setRepeat(Number(e.target.value))} className="text-sm">
+              <select value={repeat} onChange={(e) => setRepeat(Number(e.target.value))} className="text-sm w-full">
                 <option value={1}>1 次</option>
                 <option value={3}>3 次</option>
                 <option value={5}>5 次</option>
                 <option value={0}>∞ 無限</option>
               </select>
             </label>
-            <label className="block">
-              <span className="text-xs text-slate-400 mb-1 block">停頓</span>
-              <select value={chunkPause} onChange={(e) => setChunkPause(Number(e.target.value))} className="text-sm">
-                <option value={200}>短</option>
-                <option value={400}>中</option>
-                <option value={600}>長</option>
-              </select>
+            <label className="flex items-center gap-2 col-span-2">
+              <input 
+                type="checkbox" 
+                checked={chunkPauseMode} 
+                onChange={(e) => setChunkPauseMode(e.target.checked)}
+                className="w-4 h-4"
+              />
+              <span className="text-xs text-slate-300">分段停頓</span>
             </label>
           </div>
         </div>
 
-        {/* Recognition result */}
-        {recognizedText && (
+        {/* Scoring result */}
+        {transcribing && (
+          <div className="card p-4">
+            <div className="text-sm text-slate-400">正在評分…</div>
+          </div>
+        )}
+        
+        {scoringResult && (
           <div className="card p-4 space-y-3">
-            <div className="text-xs text-slate-500">辨識結果</div>
-            <div className="text-slate-200">{recognizedText}</div>
-            {score !== null && (
-              <div>
-                <div className="flex items-center gap-3 mb-2">
-                  <div className={`text-2xl font-bold ${
-                    score >= 80 ? 'text-emerald-400' : score >= 60 ? 'text-amber-400' : 'text-rose-400'
-                  }`}>
-                    {score}%
-                  </div>
-                  <div className="flex-1 h-2 bg-panel rounded-full overflow-hidden">
-                    <div className={`h-full transition-all ${
-                      score >= 80 ? 'bg-emerald-500' : score >= 60 ? 'bg-amber-500' : 'bg-rose-500'
-                    }`} style={{ width: `${score}%` }} />
-                  </div>
+            <div className="flex items-center gap-3">
+              <div className={`text-3xl font-bold ${
+                scoringResult.score >= 80 ? 'text-emerald-400' : scoringResult.score >= 60 ? 'text-amber-400' : 'text-rose-400'
+              }`}>
+                {scoringResult.score}%
+              </div>
+              <div className="flex-1">
+                <div className="h-2 bg-panel rounded-full overflow-hidden">
+                  <div className={`h-full transition-all ${
+                    scoringResult.score >= 80 ? 'bg-emerald-500' : scoringResult.score >= 60 ? 'bg-amber-500' : 'bg-rose-500'
+                  }`} style={{ width: `${scoringResult.score}%` }} />
                 </div>
-                {score < 70 && (
-                  <div className="text-xs text-amber-300">
-                    💡 分數較低的句子已自動加入複習列表
-                  </div>
-                )}
+                <div className="flex gap-3 mt-1 text-xs text-slate-400">
+                  <span>正確 {scoringResult.correct}</span>
+                  <span>接近 {scoringResult.close}</span>
+                  <span>遺漏 {scoringResult.missing}</span>
+                </div>
+              </div>
+            </div>
+            
+            {/* Word-level feedback */}
+            <div className="text-sm leading-relaxed">
+              {scoringResult.alignments.map((a, i) => (
+                <span
+                  key={i}
+                  className={`inline-block mr-1 mb-1 px-1.5 py-0.5 rounded ${
+                    a.match === 'correct' ? 'bg-emerald-500/20 text-emerald-300' :
+                    a.match === 'close' ? 'bg-amber-500/20 text-amber-300' :
+                    'bg-rose-500/20 text-rose-300'
+                  }`}
+                  title={a.recognizedWord ? `聽到: ${a.recognizedWord}` : '遺漏'}
+                >
+                  {a.targetWord}
+                </span>
+              ))}
+            </div>
+            
+            {scoringResult.score < 70 && (
+              <div className="text-xs text-amber-300">
+                💡 分數較低的句子已自動加入複習列表
               </div>
             )}
           </div>
@@ -452,13 +727,11 @@ export default function ArticlePractice() {
         </div>
 
         {/* Unsupported features */}
-        {(!hasSpeechSynthesis || !hasMediaRecorder || !hasSpeechRecognition) && (
+        {!hasMediaRecorder && (
           <div className="card p-4 bg-amber-500/10 border-amber-500/30">
             <div className="text-sm text-amber-300 font-medium mb-2">功能限制</div>
-            <div className="text-xs text-slate-300 space-y-1">
-              {!hasSpeechSynthesis && <p>• 此瀏覽器不支援語音合成（TTS）</p>}
-              {!hasMediaRecorder && <p>• 此瀏覽器不支援錄音功能</p>}
-              {!hasSpeechRecognition && <p>• 此瀏覽器不支援語音辨識</p>}
+            <div className="text-xs text-slate-300">
+              <p>• 此瀏覽器不支援錄音功能</p>
               <p className="mt-2">建議使用 Chrome 或 Safari 以獲得完整功能。</p>
             </div>
           </div>
@@ -466,30 +739,4 @@ export default function ArticlePractice() {
       </div>
     </Page>
   )
-}
-
-// Levenshtein distance scoring (reuse from ShadowPanel)
-function calculateScore(target: string, recognized: string): number {
-  if (!recognized.trim()) return 0
-  const distance = levenshtein(target, recognized)
-  const maxLen = Math.max(target.length, recognized.length)
-  const accuracy = Math.max(0, 1 - distance / maxLen)
-  return Math.round(accuracy * 100)
-}
-
-function levenshtein(a: string, b: string): number {
-  const m = a.length, n = b.length
-  const dp: number[][] = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0))
-  for (let i = 0; i <= m; i++) dp[i][0] = i
-  for (let j = 0; j <= n; j++) dp[0][j] = j
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      if (a[i - 1].toLowerCase() === b[j - 1].toLowerCase()) {
-        dp[i][j] = dp[i - 1][j - 1]
-      } else {
-        dp[i][j] = Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]) + 1
-      }
-    }
-  }
-  return dp[m][n]
 }

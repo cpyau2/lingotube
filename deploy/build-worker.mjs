@@ -22,7 +22,9 @@ function add(p) {
 walk(DIST)
 const captionsSrc = fs.readFileSync('worker/captions.js', 'utf8').replace(/^export /gm, '')
 const aiSrc = fs.readFileSync('worker/ai.js', 'utf8').replace(/^export /gm, '')
-const worker = captionsSrc + '\n' + aiSrc + `\nconst FILES = ${JSON.stringify(files)};
+const ttsSrc = fs.readFileSync('worker/tts.js', 'utf8').replace(/^export /gm, '')
+const sttSrc = fs.readFileSync('worker/stt.js', 'utf8').replace(/^export /gm, '')
+const worker = captionsSrc + '\n' + aiSrc + '\n' + ttsSrc + '\n' + sttSrc + `\nconst FILES = ${JSON.stringify(files)};
 const cache = new Map();
 function body(p) {
   const f = FILES[p];
@@ -33,10 +35,12 @@ function body(p) {
 export default {
   async fetch(req, env) {
     const p = new URL(req.url).pathname;
-    const isApiRoute = p === '/api/captions' || p === '/api/ai';
+    const isApiRoute = p === '/api/captions' || p === '/api/ai' || p === '/api/tts' || p === '/api/stt';
     if (req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'POST') return new Response('Method Not Allowed', { status: 405 });
     if (p === '/api/captions') return req.method === 'GET' ? handleCaptions(req, env) : new Response('Method Not Allowed', { status: 405 });
     if (p === '/api/ai') return handleAI(req, env);
+    if (p === '/api/tts') return handleTTS(req, env);
+    if (p === '/api/stt') return handleSTT(req, env);
     if (req.method !== 'GET' && req.method !== 'HEAD') return new Response('Method Not Allowed', { status: 405 });
     let fp = p === '/' ? '/index.html' : p;
     let status = 200;

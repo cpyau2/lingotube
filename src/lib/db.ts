@@ -9,6 +9,8 @@ class LingoDB extends Dexie {
   dict!: Table<DictEntry & { key: string; at: number }, string>
   kv!: Table<{ key: string; value: unknown }, string>
   articles!: Table<ArticleScript, number>
+  audioCache!: Table<{ key: string; blob: Blob; createdAt: number }, string>
+  recordings!: Table<{ key: string; blob: Blob; createdAt: number }, string>
 
   constructor() {
     super('lingotube')
@@ -40,6 +42,18 @@ class LingoDB extends Dexie {
       dict: 'key',
       kv: 'key',
       articles: '++id, createdAt',
+    })
+    // v4: add audio cache and recordings
+    this.version(4).stores({
+      videos: 'id, createdAt',
+      prefs: 'id',
+      words: '++id, word, videoId, dueAt, createdAt',
+      sentences: '++id, videoId, start, dueAt, createdAt',
+      dict: 'key',
+      kv: 'key',
+      articles: '++id, createdAt',
+      audioCache: 'key, createdAt',
+      recordings: 'key, createdAt',
     })
   }
 }
