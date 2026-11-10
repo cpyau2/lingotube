@@ -266,7 +266,7 @@ export default function Watch() {
         )}
         {tab === 'shadow' && (
           <div className="p-4 scroll-y">
-            <ShadowPanel cues={video.cues} currentIdx={active} />
+            <ShadowPanel cues={video.cues} currentIdx={active} videoId={id} player={get()} />
           </div>
         )}
       </section>

@@ -6,7 +6,8 @@ import { db } from '../lib/db'
 import { calculatePartProgress } from '../lib/articleParser'
 import type { ArticleScript, ArticlePart, ArticleSentence } from '../lib/types'
 import { newSrs } from '../lib/srs'
-import { calculateDetailedScore, type WordAlignment, type ScoringResult } from '../lib/scoring'
+import { calculateDetailedScore, type ScoringResult } from '../lib/scoring'
+import { ScoringDisplay } from '../components/ScoringDisplay'
 
 type PlayMode = 'sentence' | 'part'
 
@@ -131,9 +132,10 @@ export default function ArticlePractice() {
     await db.articles.put(updated)
   }, [article, partIdx, sentenceIdx])
   
-  // Get or generate TTS audio for a sentence
-  const getTTSAudio = useCallback(async (text: string, voice: string = 'aura-1-en'): Promise<Blob | null> => {
-    const cacheKey = `tts:${text}:${voice}`
+  // Get or generate TTS audio for a sentence (Google TTS via Worker proxy)
+  const getTTSAudio = useCallback(async (text: string): Promise<Blob | null> => {
+    // Changed cache key prefix to v2 to invalidate old Aura audio
+    const cacheKey = `tts-v2:${text}:google-en`
     
     // Check cache first
     const cached = await db.audioCache.get(cacheKey)
@@ -141,13 +143,10 @@ export default function ArticlePractice() {
       return cached.blob
     }
     
-    // Generate via Worker
+    // Generate via Worker (GET endpoint for Google TTS proxy)
     try {
-      const resp = await fetch('/api/tts', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ text, voice }),
-      })
+      const params = new URLSearchParams({ q: text, tl: 'en' })
+      const resp = await fetch(`/api/tts?${params}`)
       
       if (!resp.ok) {
         console.error('TTS failed:', await resp.text())
@@ -223,6 +222,7 @@ export default function ArticlePractice() {
         return new Promise<void>((resolve) => {
           const audio = new Audio(URL.createObjectURL(audioBlob))
           audio.playbackRate = speed
+          audio.preservesPitch = true
           audioRef.current = audio
           
           const duration = 0 // Unknown until loaded
@@ -477,17 +477,6 @@ export default function ArticlePractice() {
     await playSentence()
   }
   
-  const playBackToBack = async () => {
-    if (!recordedBlob) return
-    
-    // Play original
-    await playSentence()
-    await new Promise(resolve => setTimeout(resolve, 500))
-    
-    // Play recording
-    playRecording()
-  }
-  
   const nextSentence = () => {
     if (!article) return
     const part = article.parts[partIdx]
@@ -619,13 +608,10 @@ export default function ArticlePractice() {
           {recordedBlob && (
             <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-700">
               <button className="btn ghost text-sm" onClick={playRecording}>
-                ▶ 播放我的錄音
+                ▶ 播我的錄音
               </button>
               <button className="btn ghost text-sm" onClick={playOriginal} disabled={playing}>
                 ▶ 播放原句
-              </button>
-              <button className="btn ghost text-sm" onClick={playBackToBack} disabled={playing}>
-                ⇄ 對比播放
               </button>
             </div>
           )}
@@ -669,50 +655,7 @@ export default function ArticlePractice() {
         )}
         
         {scoringResult && (
-          <div className="card p-4 space-y-3">
-            <div className="flex items-center gap-3">
-              <div className={`text-3xl font-bold ${
-                scoringResult.score >= 80 ? 'text-emerald-400' : scoringResult.score >= 60 ? 'text-amber-400' : 'text-rose-400'
-              }`}>
-                {scoringResult.score}%
-              </div>
-              <div className="flex-1">
-                <div className="h-2 bg-panel rounded-full overflow-hidden">
-                  <div className={`h-full transition-all ${
-                    scoringResult.score >= 80 ? 'bg-emerald-500' : scoringResult.score >= 60 ? 'bg-amber-500' : 'bg-rose-500'
-                  }`} style={{ width: `${scoringResult.score}%` }} />
-                </div>
-                <div className="flex gap-3 mt-1 text-xs text-slate-400">
-                  <span>正確 {scoringResult.correct}</span>
-                  <span>接近 {scoringResult.close}</span>
-                  <span>遺漏 {scoringResult.missing}</span>
-                </div>
-              </div>
-            </div>
-            
-            {/* Word-level feedback */}
-            <div className="text-sm leading-relaxed">
-              {scoringResult.alignments.map((a, i) => (
-                <span
-                  key={i}
-                  className={`inline-block mr-1 mb-1 px-1.5 py-0.5 rounded ${
-                    a.match === 'correct' ? 'bg-emerald-500/20 text-emerald-300' :
-                    a.match === 'close' ? 'bg-amber-500/20 text-amber-300' :
-                    'bg-rose-500/20 text-rose-300'
-                  }`}
-                  title={a.recognizedWord ? `聽到: ${a.recognizedWord}` : '遺漏'}
-                >
-                  {a.targetWord}
-                </span>
-              ))}
-            </div>
-            
-            {scoringResult.score < 70 && (
-              <div className="text-xs text-amber-300">
-                💡 分數較低的句子已自動加入複習列表
-              </div>
-            )}
-          </div>
+          <ScoringDisplay result={scoringResult} showLowScoreHint />
         )}
 
         {/* Navigation */}

@@ -1,9 +1,10 @@
-// TTS service handler for Workers AI text-to-speech
-// POST /api/tts with { text, voice?, speed? } -> audio stream
+// TTS service handler with Google Translate TTS proxy + Workers AI fallback
+// GET /api/tts?q=...&tl=en -> audio stream (Google TTS proxy)
+// POST /api/tts with { text, voice?, speed? } -> audio stream (Workers AI)
 
 const TTS_MODELS = [
-  '@cf/deepgram/aura-1', // Primary model - natural TTS
-  '@cf/myshell-ai/melotts', // Fallback
+  '@cf/deepgram/aura-1', // Fallback 1 - natural TTS
+  '@cf/myshell-ai/melotts', // Fallback 2
 ]
 
 function b64ToBytes(b64) {
@@ -51,11 +52,147 @@ async function generateTTS(env, text, voice = 'luna', speed = 1.0) {
   throw lastErr || new Error('All TTS models failed')
 }
 
+// Split text at punctuation or spaces for Google TTS 200-char limit
+function splitForGoogle(text, maxLen = 200) {
+  if (text.length <= maxLen) return [text]
+  
+  const chunks = []
+  let remaining = text
+  
+  while (remaining.length > 0) {
+    if (remaining.length <= maxLen) {
+      chunks.push(remaining)
+      break
+    }
+    
+    // Try to split at punctuation
+    let splitIdx = -1
+    const punctuation = ['. ', '! ', '? ', ', ', '; ', ': ']
+    for (const p of punctuation) {
+      const idx = remaining.lastIndexOf(p, maxLen)
+      if (idx > 0 && idx > splitIdx) {
+        splitIdx = idx + p.length
+      }
+    }
+    
+    // Fallback to space
+    if (splitIdx < 0) {
+      splitIdx = remaining.lastIndexOf(' ', maxLen)
+      if (splitIdx > 0) splitIdx++
+    }
+    
+    // Last resort: hard cut
+    if (splitIdx < 0) splitIdx = maxLen
+    
+    chunks.push(remaining.slice(0, splitIdx))
+    remaining = remaining.slice(splitIdx)
+  }
+  
+  return chunks
+}
+
+// Fetch Google Translate TTS
+async function fetchGoogleTTS(text, lang = 'en') {
+  const chunks = splitForGoogle(text)
+  const parts = []
+  
+  for (const chunk of chunks) {
+    const url = 'https://translate.google.com/translate_tts?' + new URLSearchParams({
+      ie: 'UTF-8',
+      client: 'tw-ob',
+      tl: lang,
+      q: chunk,
+    })
+    
+    const resp = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': 'https://translate.google.com/',
+      },
+    })
+    
+    if (!resp.ok || !resp.headers.get('content-type')?.includes('audio')) {
+      throw new Error(`Google TTS failed: ${resp.status}`)
+    }
+    
+    parts.push(new Uint8Array(await resp.arrayBuffer()))
+  }
+  
+  // Concatenate MP3 parts
+  const totalLen = parts.reduce((sum, p) => sum + p.length, 0)
+  const combined = new Uint8Array(totalLen)
+  let offset = 0
+  for (const part of parts) {
+    combined.set(part, offset)
+    offset += part.length
+  }
+  
+  return combined
+}
+
 async function handleTTS(req, env) {
+  const url = new URL(req.url)
+  
   if (req.method === 'HEAD') {
     return new Response(null, { status: 200, headers: { 'content-type': 'audio/mpeg' } })
   }
 
+  // GET /api/tts?q=...&tl=en -> Google TTS proxy
+  if (req.method === 'GET') {
+    const text = url.searchParams.get('q')
+    const lang = url.searchParams.get('tl') || 'en'
+    
+    if (!text) {
+      return new Response(JSON.stringify({ error: 'Missing q parameter' }), {
+        status: 400,
+        headers: { 'content-type': 'application/json' },
+      })
+    }
+    
+    try {
+      // Try Worker Cache API first
+      const cache = caches.default
+      const cacheKey = new Request(req.url)
+      let cached = await cache.match(cacheKey)
+      if (cached) return cached
+      
+      // Fetch from Google
+      const audio = await fetchGoogleTTS(text, lang)
+      
+      const response = new Response(audio, {
+        status: 200,
+        headers: { 
+          'content-type': 'audio/mpeg',
+          'cache-control': 'public, max-age=86400',
+        },
+      })
+      
+      // Cache it
+      await cache.put(cacheKey, response.clone())
+      return response
+    } catch (e) {
+      console.error('Google TTS failed, falling back to Workers AI:', e)
+      // Fallback to Workers AI
+      try {
+        const audio = await generateTTS(env, text, 'luna', 1.0)
+        return new Response(audio, {
+          status: 200,
+          headers: { 
+            'content-type': 'audio/mpeg',
+            'cache-control': 'public, max-age=86400',
+          },
+        })
+      } catch (e2) {
+        console.error('All TTS methods failed:', e2)
+        return new Response(JSON.stringify({ error: 'TTS service unavailable' }), {
+          status: 500,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
+    }
+  }
+
+  // POST /api/tts -> Workers AI (kept for compatibility)
   if (req.method !== 'POST') {
     return new Response('Method Not Allowed', { status: 405 })
   }
@@ -77,7 +214,7 @@ async function handleTTS(req, env) {
       status: 200,
       headers: { 
         'content-type': 'audio/mpeg',
-        'cache-control': 'public, max-age=86400', // Cache for 24h
+        'cache-control': 'public, max-age=86400',
       },
     })
   } catch (e) {
