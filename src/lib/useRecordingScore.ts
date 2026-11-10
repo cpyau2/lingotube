@@ -18,6 +18,11 @@ export function useRecordingScore(options: UseRecordingScoreOptions = {}) {
   
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const recognitionRef = useRef<any>(null)
+  const storageKeyRef = useRef(options.storageKey)
+  storageKeyRef.current = options.storageKey
+  const onScoreRef = useRef(options.onScoreCalculated)
+  onScoreRef.current = options.onScoreCalculated
+  const transcribingRef = useRef(false)
   
   const hasMediaRecorder = typeof MediaRecorder !== 'undefined'
   const hasSpeechRecognition = typeof (window as any).SpeechRecognition !== 'undefined' || 
@@ -51,9 +56,10 @@ export function useRecordingScore(options: UseRecordingScoreOptions = {}) {
         stream.getTracks().forEach(track => track.stop())
         
         // Save to IndexedDB if storageKey provided
-        if (options.storageKey) {
+        const key = storageKeyRef.current
+        if (key) {
           await db.recordings.put({
-            key: options.storageKey,
+            key,
             blob,
             createdAt: Date.now(),
           })
@@ -68,7 +74,7 @@ export function useRecordingScore(options: UseRecordingScoreOptions = {}) {
       console.error('Recording failed:', e)
       return false
     }
-  }, [hasMediaRecorder, options.storageKey])
+  }, [hasMediaRecorder])
 
   // Stop recording
   const stopRecording = useCallback(() => {
@@ -80,12 +86,13 @@ export function useRecordingScore(options: UseRecordingScoreOptions = {}) {
 
   // Transcribe and score via Workers AI Whisper
   const transcribeAndScore = useCallback(async (blob: Blob, targetText: string) => {
+    if (transcribingRef.current) return null
+    transcribingRef.current = true
     setTranscribing(true)
     setScoringResult(null)
     
     let transcript = ''
     
-    // Try Workers AI Whisper first
     try {
       const formData = new FormData()
       formData.append('audio', blob, 'recording.webm')
@@ -103,24 +110,14 @@ export function useRecordingScore(options: UseRecordingScoreOptions = {}) {
       console.error('Whisper STT failed:', e)
     }
     
-    // Fallback to browser SpeechRecognition (limited - can't process blob)
-    if (!transcript && hasSpeechRecognition) {
-      console.log('SpeechRecognition fallback not available for recorded audio')
-      // Browser SpeechRecognition can't process pre-recorded blobs, only live mic
-    }
-    
-    // Calculate score
+    // Browser SpeechRecognition can't process pre-recorded blobs, only live mic
     const result = calculateDetailedScore(targetText, transcript)
     setScoringResult(result)
+    transcribingRef.current = false
     setTranscribing(false)
-    
-    // Callback
-    if (options.onScoreCalculated) {
-      options.onScoreCalculated(result.score)
-    }
-    
+    onScoreRef.current?.(result.score)
     return result
-  }, [hasSpeechRecognition, options])
+  }, [])
 
   // Auto-transcribe current blob
   const autoTranscribeAndScore = useCallback(async (targetText: string) => {

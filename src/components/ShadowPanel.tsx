@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Cue } from '../lib/types'
 import type { PlayerApi } from '../lib/player'
 import { useRecordingScore } from '../lib/useRecordingScore'
@@ -13,6 +13,7 @@ interface Props {
 
 export function ShadowPanel({ cues, currentIdx, videoId, player }: Props) {
   const [idx, setIdx] = useState(Math.max(0, currentIdx))
+  const stopOriginalRef = useRef<(() => void) | null>(null)
   
   const cue = cues[idx]
   const storageKey = cue ? `recording:video:${videoId}:${cue.start}` : undefined
@@ -43,15 +44,18 @@ export function ShadowPanel({ cues, currentIdx, videoId, player }: Props) {
 
   // Cleanup on unmount
   useEffect(() => {
-    return cleanup
+    return () => {
+      cleanup()
+      stopOriginalRef.current?.()
+    }
   }, [cleanup])
 
-  // When recording stops, auto-transcribe and score
+  // When recording stops, auto-transcribe and score (guard against double-fire)
   useEffect(() => {
-    if (!recording && recordedBlob && cue && !scoringResult) {
+    if (!recording && recordedBlob && cue && !scoringResult && !transcribing) {
       autoTranscribeAndScore(cue.en)
     }
-  }, [recording, recordedBlob, cue, scoringResult, autoTranscribeAndScore])
+  }, [recording, recordedBlob, cue, scoringResult, transcribing, autoTranscribeAndScore])
 
   const nextCue = () => {
     if (idx < cues.length - 1) {
@@ -70,27 +74,31 @@ export function ShadowPanel({ cues, currentIdx, videoId, player }: Props) {
   // Play original video audio for current cue
   const playOriginalAudio = () => {
     if (!player || !cue) return
+
+    stopOriginalRef.current?.()
     
-    // Pause video, seek to cue start, play, and pause at end
     const startTime = cue.start
     const endTime = cue.end
     
     player.seek(startTime)
     player.play()
     
-    // Monitor and pause at end
     const checkInterval = setInterval(() => {
-      const currentTime = player.getTime()
-      if (currentTime >= endTime) {
+      if (player.getTime() >= endTime) {
         player.pause()
-        clearInterval(checkInterval)
+        stopOriginalRef.current?.()
       }
-    }, 50) // Check every 50ms
+    }, 50)
     
-    // Safety timeout
-    setTimeout(() => {
-      clearInterval(checkInterval)
+    const safety = setTimeout(() => {
+      stopOriginalRef.current?.()
     }, (endTime - startTime + 1) * 1000)
+
+    stopOriginalRef.current = () => {
+      clearInterval(checkInterval)
+      clearTimeout(safety)
+      stopOriginalRef.current = null
+    }
   }
 
   const handleStartRecording = async () => {
