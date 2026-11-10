@@ -9,9 +9,13 @@ import Saved from './pages/Saved'
 import Review from './pages/Review'
 import Settings from './pages/Settings'
 import Topics from './pages/Topics'
+import ArticleList from './pages/ArticleList'
+import ArticleNew from './pages/ArticleNew'
+import ArticlePractice from './pages/ArticlePractice'
 
 const nav = [
   { to: '/', label: '首頁', icon: '🏠', end: true },
+  { to: '/articles', label: '文章跟讀', icon: '📖' },
   { to: '/saved', label: '生字庫', icon: '📚' },
   { to: '/review', label: '複習', icon: '🧠', badge: true },
   { to: '/topics', label: '主題', icon: '🗂️' },
@@ -53,6 +57,9 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/watch/:id" element={<Watch />} />
+          <Route path="/articles" element={<ArticleList />} />
+          <Route path="/articles/new" element={<ArticleNew />} />
+          <Route path="/articles/:id" element={<ArticlePractice />} />
           <Route path="/saved" element={<Saved />} />
           <Route path="/review" element={<Review />} />
           <Route path="/topics" element={<Topics />} />
@@ -62,7 +69,7 @@ export default function App() {
       </main>
 
       {/* mobile bottom nav */}
-      <nav className="md:hidden shrink-0 grid grid-cols-5 border-t border-line bg-panel safe-b">
+      <nav className="md:hidden shrink-0 grid grid-cols-6 border-t border-line bg-panel safe-b">
         {nav.map((n) => (
           <NavLink key={n.to} to={n.to} end={n.end}
             className={({ isActive }) => `relative flex flex-col items-center gap-0.5 py-2 text-[11px] ${isActive ? 'text-sky-300 font-semibold' : 'text-slate-400'}`}>

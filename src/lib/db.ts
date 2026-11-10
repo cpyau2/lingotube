@@ -1,5 +1,5 @@
 import Dexie, { type Table } from 'dexie'
-import type { SentenceRec, VideoPrefs, VideoRec, WordRec, DictEntry } from './types'
+import type { SentenceRec, VideoPrefs, VideoRec, WordRec, DictEntry, ArticleScript } from './types'
 
 class LingoDB extends Dexie {
   videos!: Table<VideoRec, string>
@@ -8,6 +8,7 @@ class LingoDB extends Dexie {
   sentences!: Table<SentenceRec, number>
   dict!: Table<DictEntry & { key: string; at: number }, string>
   kv!: Table<{ key: string; value: unknown }, string>
+  articles!: Table<ArticleScript, number>
 
   constructor() {
     super('lingotube')
@@ -29,6 +30,16 @@ class LingoDB extends Dexie {
       kv: 'key',
     }).upgrade((tx) => {
       // no migration needed, just add kv entries
+    })
+    // v3: add article scripts
+    this.version(3).stores({
+      videos: 'id, createdAt',
+      prefs: 'id',
+      words: '++id, word, videoId, dueAt, createdAt',
+      sentences: '++id, videoId, start, dueAt, createdAt',
+      dict: 'key',
+      kv: 'key',
+      articles: '++id, createdAt',
     })
   }
 }
@@ -97,4 +108,12 @@ export async function deleteVideos(videoIds: string[]) {
       await db.sentences.where('videoId').equals(videoId).delete()
     }
   })
+}
+
+export async function deleteArticle(articleId: number) {
+  await db.articles.delete(articleId)
+}
+
+export async function deleteArticles(articleIds: number[]) {
+  await db.articles.bulkDelete(articleIds)
 }

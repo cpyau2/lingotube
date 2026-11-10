@@ -69,3 +69,29 @@ export interface DictEntry {
   meanings: { pos: string; defs: string[] }[]
   source: 'bundled' | 'network' | 'cache' | 'none'
 }
+
+// Article Shadowing types
+export interface ArticleChunk {
+  text: string
+  stressed: boolean
+}
+
+export interface ArticleSentence {
+  chunks: ArticleChunk[]
+  attempts: number
+  bestScore: number
+  lastPractised?: number
+}
+
+export interface ArticlePart {
+  title: string
+  sentences: ArticleSentence[]
+}
+
+export interface ArticleScript {
+  id?: number
+  title: string
+  level?: string
+  parts: ArticlePart[]
+  createdAt: number
+}
