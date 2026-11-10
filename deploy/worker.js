@@ -429,40 +429,46 @@ const TTS_MODELS = [
   '@cf/myshell-ai/melotts', // Fallback
 ]
 
-async function generateTTS(env, text, voice = 'aura-1-en', speed = 1.0) {
+function b64ToBytes(b64) {
+  const bin = atob(b64)
+  const out = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i)
+  return out
+}
+
+async function toAudioBytes(resp) {
+  if (!resp) throw new Error('Empty TTS response')
+  if (resp instanceof Uint8Array) return resp
+  if (resp instanceof ArrayBuffer) return new Uint8Array(resp)
+  if (typeof ReadableStream !== 'undefined' && resp instanceof ReadableStream) {
+    return new Uint8Array(await new Response(resp).arrayBuffer())
+  }
+  if (resp instanceof Response) return new Uint8Array(await resp.arrayBuffer())
+  if (typeof resp === 'string') return b64ToBytes(resp)
+  if (resp.audio) return toAudioBytes(resp.audio)
+  throw new Error('Invalid TTS response format')
+}
+
+const AURA_SPEAKERS = ['luna', 'asteria', 'stella', 'athena', 'hera', 'orion', 'arcas', 'perseus', 'angus', 'orpheus', 'helios', 'zeus']
+
+async function generateTTS(env, text, voice = 'luna', speed = 1.0) {
   let lastErr
   for (const model of TTS_MODELS) {
     try {
-      // Workers AI TTS models accept text and optional voice/speed
-      const payload = { text }
-      
-      // Model-specific voice mappings
+      let payload
       if (model === '@cf/deepgram/aura-1') {
-        // Deepgram Aura voices: aura-1-en, aura-asteria-en, aura-luna-en, aura-stella-en, aura-athena-en, aura-hera-en, aura-orion-en, aura-arcas-en, aura-perseus-en, aura-angus-en, aura-orpheus-en, aura-helios-en, aura-zeus-en
-        payload.voice = voice || 'aura-1-en'
-      } else if (model === '@cf/myshell-ai/melotts') {
-        // MeloTTS uses language codes
-        payload.language = 'en'
+        const v = String(voice || '').replace(/^aura-/, '').replace(/-en$/, '')
+        payload = { text, speaker: AURA_SPEAKERS.includes(v) ? v : 'luna', encoding: 'mp3' }
+      } else {
+        payload = { prompt: text, lang: 'en' }
       }
-      
-      // Note: speed control is not universally supported - we'll handle it client-side via playbackRate
-      
       const resp = await env.AI.run(model, payload)
-      
-      // Workers AI TTS returns audio data (Buffer/Uint8Array)
-      if (resp instanceof Uint8Array || resp instanceof ArrayBuffer || Buffer.isBuffer(resp)) {
-        return resp
-      }
-      
-      // Handle wrapped responses
-      if (resp?.audio) {
-        return resp.audio
-      }
-      
-      throw new Error('Invalid TTS response format')
+      const bytes = await toAudioBytes(resp)
+      if (!bytes.byteLength) throw new Error('Empty audio')
+      return bytes
     } catch (e) {
-      lastErr = e
-      console.error(`TTS model ${model} failed:`, e.message)
+      lastErr = new Error(model + ': ' + (e && e.message))
+      console.error('TTS model failed:', lastErr.message)
     }
   }
   throw lastErr || new Error('All TTS models failed')
@@ -518,15 +524,17 @@ async function transcribeAudio(env, audioBuffer) {
   let lastErr
   for (const model of STT_MODELS) {
     try {
-      // Workers AI Whisper expects audio as Uint8Array or Buffer
-      const audioData = audioBuffer instanceof Uint8Array 
-        ? audioBuffer 
-        : new Uint8Array(audioBuffer)
-      
-      const resp = await env.AI.run(model, {
-        audio: audioData,
-      })
-      
+      const bytes = audioBuffer instanceof Uint8Array ? audioBuffer : new Uint8Array(audioBuffer)
+      let input
+      if (model.includes('large-v3-turbo')) {
+        let bin = ''
+        for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000))
+        input = { audio: btoa(bin), language: 'en', task: 'transcribe' }
+      } else {
+        input = { audio: Array.from(bytes) }
+      }
+      const resp = await env.AI.run(model, input)
+
       // Whisper returns { text: "transcribed text" }
       if (typeof resp?.text === 'string') {
         return resp.text
@@ -567,7 +575,7 @@ async function handleSTT(req, env) {
     if (contentType.includes('multipart/form-data')) {
       const formData = await req.formData()
       const audioFile = formData.get('audio')
-      if (!audioFile || !(audioFile instanceof File)) {
+      if (!audioFile || typeof audioFile === "string") {
         return new Response(JSON.stringify({ error: 'Missing audio file' }), {
           status: 400,
           headers: { 'content-type': 'application/json' },

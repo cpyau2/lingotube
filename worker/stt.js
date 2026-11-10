@@ -10,15 +10,17 @@ async function transcribeAudio(env, audioBuffer) {
   let lastErr
   for (const model of STT_MODELS) {
     try {
-      // Workers AI Whisper expects audio as Uint8Array or Buffer
-      const audioData = audioBuffer instanceof Uint8Array 
-        ? audioBuffer 
-        : new Uint8Array(audioBuffer)
-      
-      const resp = await env.AI.run(model, {
-        audio: audioData,
-      })
-      
+      const bytes = audioBuffer instanceof Uint8Array ? audioBuffer : new Uint8Array(audioBuffer)
+      let input
+      if (model.includes('large-v3-turbo')) {
+        let bin = ''
+        for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000))
+        input = { audio: btoa(bin), language: 'en', task: 'transcribe' }
+      } else {
+        input = { audio: Array.from(bytes) }
+      }
+      const resp = await env.AI.run(model, input)
+
       // Whisper returns { text: "transcribed text" }
       if (typeof resp?.text === 'string') {
         return resp.text
@@ -59,7 +61,7 @@ async function handleSTT(req, env) {
     if (contentType.includes('multipart/form-data')) {
       const formData = await req.formData()
       const audioFile = formData.get('audio')
-      if (!audioFile || !(audioFile instanceof File)) {
+      if (!audioFile || typeof audioFile === "string") {
         return new Response(JSON.stringify({ error: 'Missing audio file' }), {
           status: 400,
           headers: { 'content-type': 'application/json' },
