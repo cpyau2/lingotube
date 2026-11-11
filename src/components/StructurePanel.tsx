@@ -8,59 +8,84 @@ interface Props {
   onError?: (err: string) => void
 }
 
+// Render nested notes with support for sub-bullets
+function renderNote(note: string | { text: string; sub: string[] }, idx: number) {
+  if (typeof note === 'string') {
+    return (
+      <li key={idx} className="text-sm text-slate-300 leading-relaxed">
+        {note}
+      </li>
+    )
+  }
+  
+  return (
+    <li key={idx} className="text-sm text-slate-300 leading-relaxed">
+      {note.text}
+      {note.sub && note.sub.length > 0 && (
+        <ul className="ml-4 mt-1 space-y-1 list-none">
+          {note.sub.map((subNote, subIdx) => (
+            <li key={subIdx} className="text-sm text-slate-400 leading-relaxed flex gap-2">
+              <span className="text-sky-400/60 shrink-0">◦</span>
+              <span>{subNote}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </li>
+  )
+}
+
 export function StructurePanel({ sentence, onError }: Props) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [explanation, setExplanation] = useState<SentenceExplanation | null>(null)
 
-  useEffect(() => {
-    let mounted = true
+  const load = async (forceRefresh = false) => {
     setLoading(true)
     setError('')
 
-    const load = async () => {
-      try {
-        // check cache first
-        const cacheKey = `struct:${sentence}`
+    try {
+      // check cache first (unless force refresh)
+      const cacheKey = `struct:v2:${sentence}` // v2 to invalidate old cache
+      if (!forceRefresh) {
         const cached = await db.kv.get(cacheKey)
         if (cached?.value) {
-          if (mounted) {
-            setExplanation(cached.value as SentenceExplanation)
-            setLoading(false)
-          }
+          setExplanation(cached.value as SentenceExplanation)
+          setLoading(false)
           return
         }
-
-        // call AI
-        const { getProvider } = await import('../lib/ai/provider')
-        const provider = await getProvider()
-        
-        if (!provider.available) {
-          throw new Error('尚未設定 AI 服務')
-        }
-
-        const result = await provider.explainSentence(sentence)
-        
-        // cache result
-        await db.kv.put({ key: cacheKey, value: result })
-        
-        if (mounted) {
-          setExplanation(result)
-          setLoading(false)
-        }
-      } catch (e: any) {
-        if (mounted) {
-          const msg = e.message || String(e)
-          setError(msg)
-          setLoading(false)
-          onError?.(msg)
-        }
       }
-    }
 
+      // call AI
+      const { getProvider } = await import('../lib/ai/provider')
+      const provider = await getProvider()
+      
+      if (!provider.available) {
+        throw new Error('尚未設定 AI 服務')
+      }
+
+      const result = await provider.explainSentence(sentence)
+      
+      // cache result
+      await db.kv.put({ key: cacheKey, value: result })
+      
+      setExplanation(result)
+      setLoading(false)
+    } catch (e: any) {
+      const msg = e.message || String(e)
+      setError(msg)
+      setLoading(false)
+      onError?.(msg)
+    }
+  }
+
+  useEffect(() => {
     load()
-    return () => { mounted = false }
-  }, [sentence, onError])
+  }, [sentence])
+
+  const handleRefresh = () => {
+    load(true)
+  }
 
   if (loading) {
     return (
@@ -87,45 +112,182 @@ export function StructurePanel({ sentence, onError }: Props) {
     return null
   }
 
+  // Check if this is the new format or legacy format
+  const isNewFormat = explanation.components && explanation.components.length > 0
+
+  // Render legacy format for backward compatibility
+  if (!isNewFormat && explanation.breakdown) {
+    return (
+      <div className="space-y-4">
+        <div className="card p-4">
+          <div className="text-xs text-slate-500 mb-1">句型結構</div>
+          <div className="text-slate-200 font-medium">{explanation.structure}</div>
+        </div>
+
+        {explanation.breakdown.length > 0 && (
+          <div className="card p-4">
+            <div className="text-xs text-slate-500 mb-2">成分拆解</div>
+            <div className="flex flex-wrap gap-2">
+              {explanation.breakdown.map((part, i) => (
+                <div key={i} className="inline-flex flex-col items-start bg-panel rounded-lg px-3 py-2 border border-line">
+                  <div className="text-slate-200 font-medium">{part.text}</div>
+                  <div className="text-xs text-slate-400 mt-0.5">{part.role}</div>
+                  {part.zh && <div className="text-xs text-amber-300 mt-0.5">{part.zh}</div>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {explanation.grammarNotes && explanation.grammarNotes.length > 0 && (
+          <div className="card p-4">
+            <div className="text-xs text-slate-500 mb-2">文法重點</div>
+            <ul className="space-y-2">
+              {explanation.grammarNotes.map((note, i) => (
+                <li key={i} className="text-sm text-slate-300 leading-relaxed flex gap-2">
+                  <span className="text-sky-400 shrink-0">•</span>
+                  <span>{note}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {explanation.translationZh && (
+          <div className="card p-4">
+            <div className="text-xs text-slate-500 mb-1">翻譯</div>
+            <div className="text-amber-200" lang="zh-Hant">{explanation.translationZh}</div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // Render new detailed format
+  const circledNumbers = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩']
+
   return (
     <div className="space-y-4">
-      <div className="card p-4">
-        <div className="text-xs text-slate-500 mb-1">句型結構</div>
-        <div className="text-slate-200 font-medium">{explanation.structure}</div>
+      {/* Header with refresh button */}
+      <div className="flex items-center justify-between">
+        <div className="text-xs text-slate-500">句型拆解</div>
+        <button 
+          onClick={handleRefresh}
+          className="text-xs text-sky-400 hover:text-sky-300 transition-colors px-2 py-1 rounded hover:bg-sky-500/10"
+          title="重新分析"
+        >
+          🔄 重新分析
+        </button>
       </div>
 
-      {Array.isArray(explanation.breakdown) && explanation.breakdown.length > 0 && (
-        <div className="card p-4">
-          <div className="text-xs text-slate-500 mb-2">成分拆解</div>
-          <div className="flex flex-wrap gap-2">
-            {explanation.breakdown.map((part, i) => (
-              <div key={i} className="inline-flex flex-col items-start bg-panel rounded-lg px-3 py-2 border border-line">
-                <div className="text-slate-200 font-medium">{part.text}</div>
-                <div className="text-xs text-slate-400 mt-0.5">{part.role}</div>
-                {part.zh && <div className="text-xs text-amber-300 mt-0.5">{part.zh}</div>}
-              </div>
-            ))}
+      {/* Original sentence */}
+      <div className="card p-4">
+        <div className="text-xs text-slate-500 mb-2">原文</div>
+        <div className="text-lg text-slate-200 font-medium leading-relaxed" lang="en">
+          {sentence}
+        </div>
+      </div>
+
+      {/* Overview structure */}
+      {explanation.overview && (
+        <div className="card p-4 bg-sky-500/5 border-sky-500/20">
+          <div className="text-xs text-slate-500 mb-2">整體結構</div>
+          <div className="text-slate-200 leading-relaxed">
+            {explanation.overview}
           </div>
         </div>
       )}
 
-      {Array.isArray(explanation.grammarNotes) && explanation.grammarNotes.length > 0 && (
-        <div className="card p-4">
-          <div className="text-xs text-slate-500 mb-2">文法重點</div>
-          <ul className="space-y-2">
-            {explanation.grammarNotes.map((note, i) => (
-              <li key={i} className="text-sm text-slate-300 leading-relaxed flex gap-2">
-                <span className="text-sky-400 shrink-0">•</span>
-                <span>{note}</span>
-              </li>
-            ))}
-          </ul>
+      {/* Numbered components */}
+      {explanation.components && explanation.components.length > 0 && (
+        <div className="space-y-3">
+          <div className="text-sm font-medium text-slate-400">1. 句子結構拆解</div>
+          {explanation.components.map((component, idx) => (
+            <div key={idx} className="card p-4 bg-panel">
+              <div className="flex items-start gap-3 mb-3">
+                <span className="text-2xl text-amber-400 shrink-0">
+                  {circledNumbers[idx] || `${idx + 1}.`}
+                </span>
+                <div className="flex-1">
+                  <div className="text-slate-200 font-medium mb-1">
+                    {component.roleZh}
+                    {component.roleEn && (
+                      <span className="text-xs text-slate-400 ml-2">({component.roleEn})</span>
+                    )}
+                  </div>
+                  {component.text && (
+                    <div className="text-amber-300 font-medium mb-1" lang="en">
+                      {component.text}
+                    </div>
+                  )}
+                  {component.meaningZh && (
+                    <div className="text-sm text-slate-400 mb-2">
+                      （{component.meaningZh}）
+                    </div>
+                  )}
+                </div>
+              </div>
+              
+              {component.notes && component.notes.length > 0 && (
+                <ul className="ml-9 space-y-2 list-none">
+                  {component.notes.map((note, noteIdx) => renderNote(note, noteIdx))}
+                </ul>
+              )}
+            </div>
+          ))}
         </div>
       )}
 
+      {/* Grammar highlights */}
+      {explanation.highlights && explanation.highlights.length > 0 && (
+        <div className="space-y-3">
+          <div className="text-sm font-medium text-slate-400">2. 核心語法與口語亮點總結</div>
+          <div className="card p-4">
+            <ul className="space-y-3 list-none">
+              {explanation.highlights.map((highlight, idx) => (
+                <li key={idx} className="leading-relaxed">
+                  <div className="text-sm text-sky-300 font-medium mb-1 flex gap-2">
+                    <span className="text-sky-400 shrink-0">•</span>
+                    <span>{highlight.title}</span>
+                  </div>
+                  <div className="text-sm text-slate-300 ml-4">
+                    {highlight.detail}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
+
+      {/* Alternative expressions */}
+      {explanation.alternatives && explanation.alternatives.length > 0 && (
+        <div className="space-y-3">
+          <div className="text-sm font-medium text-slate-400">3. 常見口語替換表達</div>
+          <div className="card p-4">
+            <div className="space-y-3">
+              {explanation.alternatives.map((alt, idx) => (
+                <div key={idx} className="leading-relaxed">
+                  <div className="text-xs text-amber-400 font-medium mb-1">
+                    {alt.label}
+                  </div>
+                  <div className="text-sm text-slate-200 mb-1" lang="en">
+                    "{alt.en}"
+                  </div>
+                  <div className="text-sm text-slate-400">
+                    （{alt.zh}）
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Translation */}
       {explanation.translationZh && (
-        <div className="card p-4">
-          <div className="text-xs text-slate-500 mb-1">翻譯</div>
+        <div className="card p-4 bg-amber-500/5 border-amber-500/20">
+          <div className="text-xs text-slate-500 mb-1">整句翻譯</div>
           <div className="text-amber-200" lang="zh-Hant">{explanation.translationZh}</div>
         </div>
       )}

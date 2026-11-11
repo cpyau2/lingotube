@@ -14,10 +14,29 @@ import { db } from '../db'
  */
 
 export interface SentenceExplanation {
-  structure: string // e.g. "Subject + Verb + Object"
-  breakdown: { text: string; role: string; zh?: string }[]
-  grammarNotes: string[]
+  overview: string // e.g. "【話語標記】 + 【主句】"
+  components: {
+    roleZh: string
+    roleEn: string
+    text: string
+    meaningZh: string
+    notes: (string | { text: string; sub: string[] })[]
+  }[]
+  highlights: {
+    title: string
+    detail: string
+  }[]
+  alternatives: {
+    label: string
+    en: string
+    zh: string
+  }[]
   translationZh: string
+  
+  // Legacy fields for backward compatibility
+  structure?: string
+  breakdown?: { text: string; role: string; zh?: string }[]
+  grammarNotes?: string[]
 }
 
 export interface Exercise {
@@ -112,10 +131,54 @@ export class OpenAICompatibleProvider implements AIProvider {
     )
   }
   explainSentence(sentence: string) {
-    return this.json<SentenceExplanation>(
-      'You are an English teacher for a Cantonese speaker. Explain the sentence structure. Return JSON {structure, breakdown:[{text,role,zh}], grammarNotes:[string in Traditional Chinese], translationZh}.',
-      sentence,
-    )
+    const systemPrompt = `You are an expert English teacher for Traditional Chinese speakers (Cantonese/Taiwanese). Analyze English sentences with extreme depth, covering structure, grammar, colloquial nuances, and spoken English patterns.
+
+Output ONLY valid JSON in this schema:
+{
+  "overview": "【話語標記】 + 【主句（含定語從句）】 + ...",
+  "components": [
+    {
+      "roleZh": "話語標記",
+      "roleEn": "Discourse Marker",
+      "text": "So,",
+      "meaningZh": "那麼 / 好了",
+      "notes": [
+        "作用：口語中用來開啟新話題或承上啟下...",
+        {"text": "子彈點標題", "sub": ["嵌套點1", "嵌套點2"]}
+      ]
+    }
+  ],
+  "highlights": [
+    {
+      "title": "定語從句省略關係代詞",
+      "detail": "the thing I want to do（我想做的事）..."
+    }
+  ],
+  "alternatives": [
+    {"label": "更正式", "en": "First of all, I need to...", "zh": "首先，我需要..."}
+  ],
+  "translationZh": "那麼，我想談的第一件事是非常非常嚴肅的，好嗎？"
+}
+
+Few-shot example for "So, the first thing I want to talk about is pretty pretty serious, okay?":
+{
+  "overview": "【話語標記】 + 【主句（含定語從句）】 + 【確認語氣詞】",
+  "components": [
+    {"roleZh": "話語標記", "roleEn": "Discourse Marker", "text": "So,", "meaningZh": "那麼 / 好了", "notes": ["作用：口語中用來開啟新話題或承上啟下的連接詞。"]},
+    {"roleZh": "主句主語", "roleEn": "Subject", "text": "the first thing [that I want to talk about]", "meaningZh": "我想要談論的第一件事", "notes": ["核心名詞：the first thing（第一件事）。", {"text": "定語從句：(that) I want to talk about 用來修飾前面的 thing。", "sub": ["這裡省略了關係代詞 that 或 which。", "talk about 是固定搭配。"]}]}
+  ],
+  "highlights": [
+    {"title": "定語從句省略關係代詞", "detail": "the thing I want to do（我想做的事）都是極高頻的口語結構。"}
+  ],
+  "alternatives": [
+    {"label": "更正式", "en": "First of all, I need to bring up something quite serious.", "zh": "首先，我需要提一件相當嚴肅的事。"}
+  ],
+  "translationZh": "那麼，我想談的第一件事是非常非常嚴肅的，好嗎？"
+}
+
+Analyze deeply: fixed collocations, omitted words, subject-verb agreement, spoken-English nuances. Use Traditional Chinese (繁體中文) throughout.`
+    
+    return this.json<SentenceExplanation>(systemPrompt, sentence)
   }
   generateExercises(cues: { en: string; zh?: string }[], n: number) {
     return this.json<Exercise[]>(
