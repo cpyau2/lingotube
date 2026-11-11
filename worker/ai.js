@@ -115,8 +115,8 @@ Output ONLY valid JSON in this schema:
       "text": "So,",
       "meaningZh": "那么 / 好了",
       "notes": [
-        "作用：口語中用來開啟新話題或承上啟下...",
-        {"text": "子彈點標題", "sub": ["嵌套點1", "嵌套點2"]}
+        "作用：口語中用來開啟新話題或承上啟下的連接詞。",
+        {"text": "語氣與用法", "sub": ["通常讀作輕微停頓", "沒有實際實義"]}
       ]
     }
   ],
@@ -153,7 +153,7 @@ Few-shot example for "So, the first thing I want to talk about is pretty pretty 
   "translationZh": "那麼，我想談的第一件事是非常非常嚴肅的，好嗎？"
 }
 
-Analyze deeply: fixed collocations, omitted words, subject-verb agreement, adverb/adjective usage, spoken-English nuances, intonation markers, etc. Use Traditional Chinese (繁體中文) throughout.`
+Analyze deeply: fixed collocations, omitted words, subject-verb agreement, adverb/adjective usage, spoken-English nuances, intonation markers, etc. Use Traditional Chinese (繁體中文) throughout. Never copy placeholder labels from the schema (do not output 子彈點標題, 嵌套點1, 嵌套點2, or "..."). Nested note titles must be real linguistic labels.`
 
   const raw = await jsonChat(env, systemPrompt, sentence, 3000, AI_CHAT_MODELS_STRUCTURE)
   
@@ -168,13 +168,35 @@ Analyze deeply: fixed collocations, omitted words, subject-verb agreement, adver
   if (!Array.isArray(raw.alternatives)) raw.alternatives = []
   if (typeof raw.translationZh !== 'string') raw.translationZh = ''
   
+  const PLACEHOLDER_NOTE = /^(子彈點標題|嵌套點[0-9]+|[.]{3}|…)$/
+  function sanitizeNotes(notes) {
+    if (!Array.isArray(notes)) return []
+    const out = []
+    for (const n of notes) {
+      if (typeof n === 'string') {
+        if (!PLACEHOLDER_NOTE.test(n.trim())) out.push(n)
+        continue
+      }
+      if (n && typeof n === 'object') {
+        const title = String(n.text || '').trim()
+        const sub = (Array.isArray(n.sub) ? n.sub : []).map(String).filter(s => !PLACEHOLDER_NOTE.test(s.trim()))
+        if (!title || PLACEHOLDER_NOTE.test(title)) {
+          out.push(...sub)
+        } else {
+          out.push({ text: title, sub })
+        }
+      }
+    }
+    return out
+  }
+
   // Validate component structure
   raw.components = raw.components.map(c => ({
     roleZh: String(c.roleZh || ''),
     roleEn: String(c.roleEn || ''),
     text: String(c.text || ''),
     meaningZh: String(c.meaningZh || ''),
-    notes: Array.isArray(c.notes) ? c.notes : [],
+    notes: sanitizeNotes(c.notes),
   }))
   
   // Validate highlights

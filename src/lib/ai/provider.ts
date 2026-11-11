@@ -144,7 +144,7 @@ Output ONLY valid JSON in this schema:
       "meaningZh": "那麼 / 好了",
       "notes": [
         "作用：口語中用來開啟新話題或承上啟下...",
-        {"text": "子彈點標題", "sub": ["嵌套點1", "嵌套點2"]}
+        {"text": "語氣與用法", "sub": ["通常讀作輕微停頓", "沒有實際實義"]}
       ]
     }
   ],
@@ -176,7 +176,7 @@ Few-shot example for "So, the first thing I want to talk about is pretty pretty 
   "translationZh": "那麼，我想談的第一件事是非常非常嚴肅的，好嗎？"
 }
 
-Analyze deeply: fixed collocations, omitted words, subject-verb agreement, spoken-English nuances. Use Traditional Chinese (繁體中文) throughout.`
+Analyze deeply: fixed collocations, omitted words, subject-verb agreement, spoken-English nuances. Use Traditional Chinese (繁體中文) throughout. Never copy placeholder labels from the schema (do not output 子彈點標題 or 嵌套點). Nested note titles must be real linguistic labels.`
     
     return this.json<SentenceExplanation>(systemPrompt, sentence)
   }
