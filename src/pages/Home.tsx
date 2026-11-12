@@ -2,14 +2,14 @@ import { useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, deleteVideo, deleteVideos } from '../lib/db'
-import { mergeBilingual, parseSubs, parseSubtitleText, parseYouTubeId, fmtTime } from '../lib/subs'
+import { mergeBilingual, parseSubtitleText, parseYouTubeId, fmtTime } from '../lib/subs'
 import { fetchAutoCaptions } from '../lib/autoCaptions'
 import { fetchViaProxy, DEFAULT_PROXY } from '../lib/captionsProxy'
 import { Page } from '../components/Page'
 import type { Cue } from '../lib/types'
 
 async function readFile(f: File | null | undefined) {
-  return f ? parseSubs(await f.text()) : undefined
+  return f ? parseSubtitleText(await f.text()) : undefined
 }
 
 async function guessTitle(id: string) {
@@ -69,9 +69,9 @@ function AddVideo({ onDone }: { onDone: (id: string) => void }) {
         return
       }
       const enFile = enRef.current?.files?.[0]
-      if (!enFile) throw new Error('未揀字幕檔：請喺「英文字幕」撳「選擇檔案」，揀一個 .srt 或 .vtt 檔（中文字幕可選）。或者改用上面「自動抓字幕」／「貼上字幕文字」。')
+      if (!enFile) throw new Error('未揀字幕檔：請喺「英文字幕」撳「選擇檔案」，揀一個 .srt、.vtt 或 .txt 檔（中文字幕可選）。或者改用上面「自動抓字幕」／「貼上字幕文字」。')
       const en = await readFile(enFile)
-      if (!en?.length) throw new Error('呢個檔案讀唔到字幕，請確認係 .srt 或 .vtt 格式')
+      if (!en?.length) throw new Error('呢個檔案讀唔到字幕，請確認係 .srt、.vtt，或者 .txt（一行時間如 0:05，下一行字幕）格式')
       await save(yid, title, mergeBilingual(en, await readFile(zhRef.current?.files?.[0])))
     } catch (e: any) {
       setErr(e?.message === 'Failed to fetch' ? '連唔到本機字幕代理（先執行 npm run captions-proxy）' : String(e?.message ?? e))
@@ -101,8 +101,8 @@ function AddVideo({ onDone }: { onDone: (id: string) => void }) {
           <div className="space-y-2">
             <div className="text-sm font-medium">匯入字幕檔</div>
             <div className="grid sm:grid-cols-2 gap-2 text-xs text-slate-400">
-              <label className="space-y-1 block">英文字幕 .srt/.vtt<input ref={enRef} type="file" accept=".srt,.vtt,text/vtt" className="block w-full text-slate-300" /></label>
-              <label className="space-y-1 block">中文字幕（可選）<input ref={zhRef} type="file" accept=".srt,.vtt,text/vtt" className="block w-full text-slate-300" /></label>
+              <label className="space-y-1 block">英文字幕 .srt/.vtt/.txt<input ref={enRef} type="file" accept=".srt,.vtt,.txt,text/vtt,text/plain" className="block w-full text-slate-300" /></label>
+              <label className="space-y-1 block">中文字幕（可選）<input ref={zhRef} type="file" accept=".srt,.vtt,.txt,text/vtt,text/plain" className="block w-full text-slate-300" /></label>
             </div>
             <div className="flex flex-wrap gap-2">
               <button className="btn ghost" disabled={busy} onClick={() => submit('files')}>匯入字幕檔</button>

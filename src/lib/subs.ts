@@ -74,7 +74,7 @@ export const fmtTime = (t: number) => {
  */
 export function parseSubtitleText(raw: string): { start: number; end: number; text: string }[] {
   if (raw.includes('-->')) return parseSubs(raw)
-  const lines = raw.replace(/\r/g, '').split('\n').map((l) => l.trim()).filter((l) => l.length)
+  const lines = raw.replace(/^\uFEFF/, '').replace(/\r/g, '').split('\n').map((l) => l.trim()).filter((l) => l.length)
   const TS = /^(?:(\d{1,2}):)?(\d{1,2}):(\d{2})(?:\s+(.*))?$/
   const items: { start: number; text: string }[] = []
   let cur: { start: number; text: string } | null = null

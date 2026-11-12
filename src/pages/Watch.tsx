@@ -245,7 +245,7 @@ export default function Watch() {
               <CueRow key={i} cue={c} idx={i} active={i === active} prefs={prefs} saved={savedStarts.has(c.start)} savedWords={savedWords}
                 onSeek={onSeek} onWord={onWord} onSave={onSave} onStructure={onStructure} />
             ))}
-            {!video.cues.length && <div className="p-6 text-slate-400 text-sm">這部影片未有字幕。到首頁匯入 .srt / .vtt。</div>}
+            {!video.cues.length && <div className="p-6 text-slate-400 text-sm">這部影片未有字幕。到首頁匯入 .srt / .vtt / .txt。</div>}
             <div className="h-24" />
           </div>
         )}
