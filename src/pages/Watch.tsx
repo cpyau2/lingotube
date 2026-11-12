@@ -73,6 +73,7 @@ export default function Watch() {
   const [structIdx, setStructIdx] = useState<number | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const loopRef = useRef(-1)
+  const loopOnRef = useRef(false)
   const resumeRef = useRef(false)
   const cuesRef = useRef<Cue[]>([])
   cuesRef.current = video?.cues ?? []
@@ -87,6 +88,7 @@ export default function Watch() {
   // prefs load/save
   useEffect(() => {
     setPrefsLoaded(false)
+    loopRef.current = -1 // don't keep a locked line from the previous video
     db.prefs.get(id).then((p) => { setPrefs(p ?? defaultPrefs(id)); setPrefsLoaded(true) })
   }, [id])
   const setPref = <K extends keyof VideoPrefs>(k: K, v: VideoPrefs[K]) => {
@@ -100,12 +102,14 @@ export default function Watch() {
       const p = get(); const cues = cuesRef.current
       if (!p || !cues.length) return
       const t = p.getTime()
-      if (loopRef.current >= 0 && cues[loopRef.current] && t >= cues[loopRef.current].end) {
-        p.seek(cues[loopRef.current].start); return
-      }
+      const lc = loopOnRef.current && loopRef.current >= 0 ? cues[loopRef.current] : undefined
+      if (lc && t >= lc.end && t < lc.end + 1.5) { p.seek(lc.start + 0.01); return }
       let idx = -1
       for (let i = 0; i < cues.length; i++) { if (t >= cues[i].start - 0.05) idx = i; else break }
       if (idx >= 0 && t > cues[idx].end + 1.5) idx = -1 // long gap: nothing highlighted
+      // loop on but no line locked yet (e.g. saved pref on reload, or toggled before playback): lock the first line that plays
+      // user scrubbed far away from the looped line: follow them and loop the new line
+      if (loopOnRef.current && idx >= 0 && (loopRef.current < 0 || (lc && (t < lc.start - 1 || t >= lc.end + 1.5)))) loopRef.current = idx
       setActive((a) => (a === idx ? a : idx))
     }, 120)
     return () => clearInterval(iv)
@@ -121,12 +125,15 @@ export default function Watch() {
     box.scrollTo({ top: Math.max(0, target), behavior: 'smooth' })
   }, [active, prefs.autoScroll, tab])
 
-  useEffect(() => { loopRef.current = prefs.loopLine ? (loopRef.current >= 0 ? loopRef.current : active) : -1 }, [prefs.loopLine])
+  useEffect(() => {
+    loopOnRef.current = prefs.loopLine
+    loopRef.current = prefs.loopLine ? (loopRef.current >= 0 ? loopRef.current : active) : -1
+  }, [prefs.loopLine])
 
   const onSeek = useCallback((i: number) => {
     const p = get(); const c = cuesRef.current[i]
     if (!p || !c) return
-    if (loopRef.current >= 0) loopRef.current = i
+    if (loopOnRef.current) loopRef.current = i
     p.seek(c.start + 0.01); p.play(); setActive(i)
   }, [get])
 
