@@ -8,7 +8,7 @@ const MAX_PULL_RECORDS = 200
 const MAX_ID_LEN = 200
 const MAX_DATA_BYTES = 1_000_000
 
-function json(obj, status = 200) {
+function syncJson(obj, status = 200) {
   return new Response(JSON.stringify(obj), {
     status,
     headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
@@ -34,9 +34,9 @@ async function codeHashFromReq(req) {
 }
 
 async function requireSpace(env, hash) {
-  if (!hash) return { error: json({ error: '缺少或無效嘅同步碼' }, 401) }
+  if (!hash) return { error: syncJson({ error: '缺少或無效嘅同步碼' }, 401) }
   const row = await env.SYNC_DB.prepare('SELECT 1 AS ok FROM spaces WHERE code_hash = ?').bind(hash).first()
-  if (!row) return { error: json({ error: '找不到呢個同步碼，請確認有冇打錯。' }, 404) }
+  if (!row) return { error: syncJson({ error: '找不到呢個同步碼，請確認有冇打錯。' }, 404) }
   return { hash }
 }
 
@@ -58,9 +58,9 @@ function validateRecord(r) {
 
 async function handleSyncCreate(req, env) {
   const hash = await codeHashFromReq(req)
-  if (!hash) return json({ error: '缺少或無效嘅同步碼' }, 401)
+  if (!hash) return syncJson({ error: '缺少或無效嘅同步碼' }, 401)
   await env.SYNC_DB.prepare('INSERT OR IGNORE INTO spaces (code_hash, created_at) VALUES (?, ?)').bind(hash, Date.now()).run()
-  return json({ ok: true })
+  return syncJson({ ok: true })
 }
 
 async function handleSyncPush(req, env) {
@@ -69,22 +69,22 @@ async function handleSyncPush(req, env) {
   const { hash } = gate
 
   const len = Number(req.headers.get('content-length') || 0)
-  if (len > MAX_PUSH_BYTES) return json({ error: '同步資料太大（上限 5 MB）' }, 413)
+  if (len > MAX_PUSH_BYTES) return syncJson({ error: '同步資料太大（上限 5 MB）' }, 413)
 
   let body
-  try { body = await req.json() } catch { return json({ error: '無效 JSON' }, 400) }
+  try { body = await req.json() } catch { return syncJson({ error: '無效 JSON' }, 400) }
   if (new TextEncoder().encode(JSON.stringify(body)).length > MAX_PUSH_BYTES) {
-    return json({ error: '同步資料太大（上限 5 MB）' }, 413)
+    return syncJson({ error: '同步資料太大（上限 5 MB）' }, 413)
   }
   const records = body?.records
-  if (!Array.isArray(records)) return json({ error: '缺少 records' }, 400)
-  if (records.length > MAX_PUSH_RECORDS) return json({ error: `每次最多 ${MAX_PUSH_RECORDS} 筆` }, 400)
+  if (!Array.isArray(records)) return syncJson({ error: '缺少 records' }, 400)
+  if (records.length > MAX_PUSH_RECORDS) return syncJson({ error: `每次最多 ${MAX_PUSH_RECORDS} 筆` }, 400)
 
   for (const r of records) {
     const err = validateRecord(r)
-    if (err) return json({ error: err }, 400)
+    if (err) return syncJson({ error: err }, 400)
   }
-  if (!records.length) return json({ ok: true, accepted: 0 })
+  if (!records.length) return syncJson({ ok: true, accepted: 0 })
 
   const maxRow = await env.SYNC_DB.prepare('SELECT COALESCE(MAX(seq), 0) AS m FROM records WHERE code_hash = ?').bind(hash).first()
   let seq = Number(maxRow?.m || 0)
@@ -107,7 +107,7 @@ async function handleSyncPush(req, env) {
     )
   }
   await env.SYNC_DB.batch(stmts)
-  return json({ ok: true, accepted: records.length })
+  return syncJson({ ok: true, accepted: records.length })
 }
 
 async function handleSyncPull(req, env) {
@@ -116,7 +116,7 @@ async function handleSyncPull(req, env) {
   const { hash } = gate
   const url = new URL(req.url)
   const since = Number(url.searchParams.get('since') || 0)
-  if (!Number.isFinite(since) || since < 0) return json({ error: '無效游標' }, 400)
+  if (!Number.isFinite(since) || since < 0) return syncJson({ error: '無效游標' }, 400)
 
   const rows = await env.SYNC_DB.prepare(
     `SELECT rec_id, tbl, data, updated_at, deleted, seq
@@ -139,7 +139,7 @@ async function handleSyncPull(req, env) {
     return { table: row.tbl, id, data, updatedAt: row.updated_at, deleted: row.deleted === 1, seq: row.seq }
   })
   const cursor = page.length ? page[page.length - 1].seq : since
-  return json({ records, cursor, hasMore })
+  return syncJson({ records, cursor, hasMore })
 }
 
 async function handleSync(req, env) {
@@ -154,6 +154,6 @@ async function handleSync(req, env) {
     return new Response('Not found', { status: 404 })
   } catch (e) {
     console.error('sync error', e)
-    return json({ error: e.message || '同步服務錯誤' }, 500)
+    return syncJson({ error: e.message || '同步服務錯誤' }, 500)
   }
 }
