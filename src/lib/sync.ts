@@ -22,6 +22,7 @@ export type SyncStatus = {
 type PushRec = { table: SyncTable; id: string; data: unknown | null; updatedAt: number; deleted: boolean }
 
 let syncing = false
+let inflight: Promise<SyncStatus> | null = null
 let debounceTimer: number | null = null
 const listeners = new Set<(s: SyncStatus) => void>()
 let cached: SyncStatus = { code: null, lastSyncedAt: null, lastSeq: 0, syncing: false, error: null }
@@ -252,10 +253,9 @@ async function pushBatches(code: string, records: PushRec[]) {
   }
 }
 
-export async function syncNow(): Promise<SyncStatus> {
+async function runSync(): Promise<SyncStatus> {
   const state = await readState()
   if (!state.code) return state
-  if (syncing) return { ...cached, syncing: true }
   if (typeof navigator !== 'undefined' && !navigator.onLine) {
     await setError('而家離線，連返網絡之後會再試。')
     return cached
@@ -284,6 +284,13 @@ export async function syncNow(): Promise<SyncStatus> {
     emit()
   }
   return cached
+}
+
+export async function syncNow(): Promise<SyncStatus> {
+  if (inflight) await inflight.catch(() => {})
+  const run = runSync()
+  inflight = run
+  try { return await run } finally { if (inflight === run) inflight = null }
 }
 
 export function scheduleSync() {
