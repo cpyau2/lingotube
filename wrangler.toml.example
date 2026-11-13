@@ -1,0 +1,13 @@
+# Copy to wrangler.toml and replace the placeholders.
+# wrangler.toml is gitignored so a real database id is not committed.
+name = "lingotube"
+main = "deploy/worker.js"
+compatibility_date = "2026-01-01"
+
+[ai]
+binding = "AI"
+
+[[d1_databases]]
+binding = "SYNC_DB"
+database_name = "lingotube-sync"
+database_id = "YOUR_D1_DATABASE_ID"

@@ -2,7 +2,23 @@
 // (an async arrow function for the Cloudflare connector's `execute` tool, or run via API).
 import fs from 'node:fs'
 import path from 'node:path'
+
+function loadEnvFile(file) {
+  try {
+    for (const line of fs.readFileSync(file, 'utf8').split(/\n/)) {
+      const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/)
+      if (!m || m[1] in process.env) continue
+      let v = m[2].trim()
+      if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1)
+      process.env[m[1]] = v
+    }
+  } catch { /* no .env is fine */ }
+}
+loadEnvFile(path.resolve('.env'))
+
 const DIST = 'dist'
+const WORKER_NAME = process.env.LINGOTUBE_WORKER_NAME || 'lingotube'
+const D1_DATABASE_ID = process.env.LINGOTUBE_D1_DATABASE_ID || ''
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json; charset=utf-8', '.webmanifest': 'application/manifest+json; charset=utf-8', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.wasm': 'application/wasm', '.txt': 'text/plain; charset=utf-8' }
 const BIN = new Set(['.png', '.ico', '.woff2', '.wasm'])
 const files = {}
@@ -58,12 +74,16 @@ export default {
 };
 `
 fs.writeFileSync('deploy/worker.js', worker)
+if (!D1_DATABASE_ID) {
+  console.warn('LINGOTUBE_D1_DATABASE_ID is not set. deploy/deploy-code.js will use a placeholder; set it in .env (see .env.example) before deploying with the API helper.')
+}
+const d1Id = D1_DATABASE_ID || 'YOUR_D1_DATABASE_ID'
 const code = `async () => {
 const SRC = ${JSON.stringify(worker)};
 const form = new FormData();
-form.append('metadata', new Blob([JSON.stringify({ main_module: 'worker.js', compatibility_date: '2026-01-01', bindings: [{ type: 'ai', name: 'AI' }, { type: 'd1', name: 'SYNC_DB', database_id: 'YOUR_D1_DATABASE_ID' }] })], { type: 'application/json' }));
+form.append('metadata', new Blob([JSON.stringify({ main_module: 'worker.js', compatibility_date: '2026-01-01', bindings: [{ type: 'ai', name: 'AI' }, { type: 'd1', name: 'SYNC_DB', database_id: ${JSON.stringify(d1Id)} }] })], { type: 'application/json' }));
 form.append('worker.js', new Blob([SRC], { type: 'application/javascript+module' }), 'worker.js');
-const put = await cloudflare.request({ method: 'PUT', path: \`/accounts/\${accountId}/workers/scripts/lingotube\`, body: form });
+const put = await cloudflare.request({ method: 'PUT', path: \`/accounts/\${accountId}/workers/scripts/${WORKER_NAME}\`, body: form });
 return { success: put.success, errors: put.errors, id: put.result && put.result.id, size: SRC.length };
 }`
 fs.writeFileSync('deploy/deploy-code.js', code)

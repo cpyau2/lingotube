@@ -5,3 +5,13 @@ dev-dist
 *.log
 *.tsbuildinfo
 deploy/deploy-code.js
+deploy/worker.js
+.env
+.env.*
+!.env.example
+wrangler.toml
+playwright-report
+test-results
+coverage
+*.bundle
+.DS_Store

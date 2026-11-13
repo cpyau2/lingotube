@@ -1,169 +1,169 @@
-# LingoTube 🎬🇬🇧
+# LingoTube
 
-Trancy-style English learning PWA for Cantonese / Chinese speakers. Watch YouTube with
-**side-by-side English + Traditional Chinese subtitles**, tap any word for its meaning and
-pronunciation, save words and sentences, and review them with spaced repetition.
-Local-first: everything is stored in IndexedDB on your device — **no account needed**, works offline.
+用 YouTube 學英文的本地優先 PWA：雙語字幕、點字查詞、跟讀評分，不用註冊。
 
-## Stack
+A local-first English-learning PWA: watch YouTube with bilingual subtitles, tap a word to look it up, practise shadowing, and review with spaced repetition — all on your device, with optional code-based sync and no account required.
 
-| Concern | Choice |
+**Live demo:** [https://lingotube.hackerkurumi.workers.dev](https://lingotube.hackerkurumi.workers.dev)
+
+The demo is a personal Cloudflare Worker deployment. You can try the bundled TED-Ed video immediately; it works even if YouTube is blocked, because the captions ship with the app.
+
+## Screenshots
+
+The shots below were taken from the live demo, using the bundled TED-Ed lesson and the built-in “Brunch & Dim Sum” article. No personal data.
+
+| Home | Watch (bilingual subtitles) |
 | --- | --- |
-| App | Vite + React 19 + TypeScript, HashRouter (static-host friendly) |
-| UI | Tailwind CSS v4, Traditional Chinese labels, mobile-first / responsive |
-| PWA | `vite-plugin-pwa` (manifest, Workbox precache, auto-update, 192/512/maskable icons) |
-| Data | Dexie (IndexedDB): videos, per-video prefs, words, sentences, dictionary cache, settings |
-| Video | YouTube IFrame Player API (polled at ~8 Hz for subtitle sync). Falls back to a timer when offline / embedding blocked |
-| Word lookup | bundled offline gloss for the demo → IndexedDB cache → dictionaryapi.dev (EN definition, IPA, audio) + MyMemory (zh-TW gloss) |
-| Pronunciation | dictionary audio when available, else Web Speech `speechSynthesis` |
-| SRS | SM-2 flavoured scheduler, 4 buttons (重來 / 困難 / 良好 / 簡單) |
-| AI | `src/lib/ai/provider.ts`: `AIProvider` interface + `NoAIProvider` + `OpenAICompatibleProvider` (key stored locally). Wired into the UI from M2 |
-| Captions | Demo bundled; import `.srt` / `.vtt`; optional local proxy (`server/captions-proxy.mjs`, uses `yt-dlp`) |
+| ![Home: video library and the bundled demo](docs/screenshots/home.png) | ![Watch: English and Traditional Chinese subtitles](docs/screenshots/watch.png) |
 
-## Run it
+| Sentence breakdown (句型拆解) | Shadowing (跟讀) |
+| --- | --- |
+| ![AI sentence structure breakdown](docs/screenshots/structure.png) | ![Shadowing practice with original audio and recording](docs/screenshots/shadowing.png) |
+
+| Article shadowing (文章跟讀) | Settings: device sync |
+| --- | --- |
+| ![Article shadowing with stressed chunks](docs/screenshots/articles.png) | ![Settings with 同步碼 create/join panel](docs/screenshots/settings-sync.png) |
+
+## Features
+
+- **Bilingual subtitles** on a YouTube video: English, Chinese, Japanese, or Korean as the primary line, with a secondary translation line when one is available.
+- **Auto-fetch captions** from YouTube in the browser (server-side Worker), preferring human-written tracks over auto-generated ones. Manual import of `.srt`, `.vtt`, and YouTube-style `.txt` transcripts as a fallback.
+- **Tap-to-define** on English words: Traditional Chinese gloss, English definition, IPA, and pronunciation. Save words and whole sentences to a vocab bank.
+- **Spaced repetition** (SM-2 style) for words and sentences.
+- **句型拆解:** AI breakdown of an English sentence (components, roles, grammar notes in Traditional Chinese). Cached on the device.
+- **練習 and 主題:** generated exercises and theme grouping for saved items (Workers AI, or your own OpenAI-compatible key).
+- **跟讀 (video shadowing):** play the line from the video, record yourself, then play both back. Scoring uses phonetic matching (Metaphone) plus Levenshtein alignment and colours words as exact / close / missed.
+- **文章跟讀:** practise a passage split into stressed chunks (bundled A2 “Brunch & Dim Sum” demo, or paste your own).
+- **同步碼:** share videos, captions, vocab, and review progress across your own devices with a 128-bit hex code (and a local QR). No account. Recordings and AI/TTS caches stay on the device.
+- **PWA:** installable, hash-routed, works offline for content already on the device.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  subgraph Client["Browser — React PWA"]
+    UI["Pages: Home, Watch, Review, Articles, Settings"]
+    Dexie[("Dexie / IndexedDB<br/>videos, cues, words, SRS, prefs")]
+    UI --> Dexie
+  end
+
+  subgraph Worker["Cloudflare Worker"]
+    API["/api/captions  /api/ai<br/>/api/tts  /api/stt  /api/sync"]
+    AI["Workers AI"]
+    D1[("D1 — SYNC_DB")]
+    API --> AI
+    API --> D1
+  end
+
+  YT["YouTube<br/>IFrame player + caption tracks"]
+  UI --> YT
+  UI -->|"same origin"| API
+  API --> YT
+```
+
+The UI is a static Vite app served by the same Worker as the APIs. Application data lives in IndexedDB first. The Worker is only needed for caption fetch, AI, TTS/STT, and sync.
+
+## Tech stack
+
+| Layer | Choice |
+| --- | --- |
+| App | Vite, React 19, TypeScript, HashRouter |
+| UI | Tailwind CSS v4, Traditional Chinese (and Cantonese) copy, mobile-first |
+| PWA | `vite-plugin-pwa`, Workbox precache |
+| Local data | Dexie (IndexedDB) |
+| Video | YouTube IFrame Player API; timer fallback when a video cannot be embedded |
+| Captions | Cloudflare Worker talks to YouTube InnerTube / timedtext; optional local `yt-dlp` proxy |
+| Dictionary | Bundled offline gloss for the demo → IndexedDB cache → dictionaryapi.dev + MyMemory |
+| AI | Cloudflare Workers AI by default (Llama 3.3 70B for sentence structure, smaller models as fallback). Optional BYOK for any OpenAI-compatible API |
+| Speech | Google Translate TTS proxy (chunked), with Workers AI Aura / MeloTTS as fallback; STT via Workers AI; browser `speechSynthesis` for quick playback |
+| Sync | Cloudflare D1, hashed sync codes, last-write-wins |
+| Scoring | Metaphone + Levenshtein word alignment |
+
+## Engineering decisions
+
+**Local-first.** Videos, cues, vocab, and review state are written to IndexedDB on the device. The bundled demo and dictionary gloss work with no network. API keys entered in Settings never leave the browser and are excluded from JSON export.
+
+**Sync via a code, not an account.** A 128-bit code is the shared secret. The server stores only `SHA-256(code)` in D1, never the code itself. Anyone who has the code can read and update that space, so the UI treats it as a key. Sync covers videos and cues, words, sentences, and per-video prefs. It does not sync recordings or AI/TTS caches.
+
+**Last-write-wins with tombstones and a server sequence cursor.** Each record has an `updatedAt`. The client pushes dirty rows; the server assigns a monotonic `seq` per space. Pull is `WHERE seq > cursor`. Deletes propagate as tombstones so a row removed on one device does not reappear from another. A tombstone also prevents the bundled demo from being re-seeded after you delete it.
+
+**AI model fallbacks.** Sentence structure prefers `@cf/meta/llama-3.3-70b-instruct-fp8-fast`, then smaller Llama instruct models if that call fails. Caption translation can use a native Chinese track, YouTube’s own `tlang`, Workers AI, or the public Google gtx endpoint, in that order.
+
+**TTS proxy chunking.** `GET /api/tts` proxies Google Translate TTS and splits text into ~200-character chunks at punctuation. If that path fails, the Worker falls back to Workers AI TTS. Responses can be cached at the edge.
+
+**Fuzzy pronunciation scoring.** A recognised transcript is aligned to the prompt with Metaphone (so “confidence” and a close mis-hearing can still match) and Levenshtein distance. The UI colours words as 正確 / 接近 / 漏咗 and shows an overall percentage. This is a practice aid, not a formal pronunciation exam, and it is built around English.
+
+## Running locally
 
 ```bash
 npm install
-npm run dev                 # dev server (http://localhost:5173)
+npm run dev          # http://localhost:5173
+```
 
-# production build + PWA (service worker only runs on the built version)
+Auto-fetch captions, Workers AI, TTS, and STT call `/api/*` on the same origin, so those paths need the deployed Worker (or a proxy to it). Locally you can still:
+
+- Use the bundled TED-Ed demo (captions included)
+- Import `.srt` / `.vtt` / `.txt` on the home page
+- Run a local [yt-dlp](https://github.com/yt-dlp/yt-dlp) proxy and use **用本機代理抓字幕**:
+
+```bash
+npm run captions-proxy    # 127.0.0.1:8787
+# if YouTube asks for a sign-in:
+# YT_COOKIES_FROM_BROWSER=chrome npm run captions-proxy
+```
+
+Production preview of the PWA (service worker only runs on the built app):
+
+```bash
 npm run build
-npm run preview             # http://localhost:4173  (also reachable on your LAN)
+npm run preview          # http://localhost:4173
 ```
 
-Install to home screen: open the preview URL in Chrome/Edge (install icon in the address bar) or
-Safari/Chrome on a phone → *Add to Home Screen*. (Service workers need `https://` or `localhost`;
-for phone testing over LAN use `https` via a tunnel, or install from a deployed https URL in M5.)
+## Deploying your own Worker
 
-### Optional: fetch captions for any YouTube video
+You need a Cloudflare account, Workers AI, and a D1 database.
 
-Browsers can't read YouTube captions directly (CORS). Two options:
+1. Create the database and apply the schema:
 
-1. **Import files** – on *首頁 → ＋加影片* paste the URL and pick an English `.srt`/`.vtt`
-   (and optionally a Chinese one; they're aligned by time).
-2. **Local proxy** – install [yt-dlp](https://github.com/yt-dlp/yt-dlp), then run
-   `npm run captions-proxy` (listens on `127.0.0.1:8787`) and use *用本機代理抓字幕*.
-   If YouTube asks for a sign-in, run with `YT_COOKIES_FROM_BROWSER=chrome npm run captions-proxy`.
+   ```bash
+   npx wrangler d1 create lingotube-sync
+   npx wrangler d1 execute lingotube-sync --file=deploy/schema.sql
+   ```
 
-### Tests
+2. Copy the examples and fill in the D1 id (do not commit the filled files — they are gitignored):
 
-```bash
-npm run build && npm run preview &        # in one terminal
-node scripts/e2e.mjs                       # headless Chrome (CHROME_PATH=... to override); screenshots -> screenshots/
-```
+   ```bash
+   cp wrangler.toml.example wrangler.toml
+   cp .env.example .env
+   # set LINGOTUBE_D1_DATABASE_ID and the wrangler.toml database_id
+   ```
 
-## Milestone 1 (done)
+3. Build the front end and bundle it with the Worker:
 
-- App shell, bottom nav (mobile) / sidebar (desktop), PWA installable + offline
-- Video page: YouTube player + synced bilingual subtitles, click a line to seek, auto-scroll, per-video toggles
-  (EN / 中文 / auto-scroll / single-line loop / pause-on-word-tap / speed / font size, persisted per video)
-- Tap a word → meaning (中文 + English), IPA, 🔊 pronunciation, save to vocab bank
-- Save sentences (☆); 生字庫 page (words / sentences, search, jump back to video, delete); JSON export/import
-- 複習: spaced-repetition flashcards (cloze for words, zh→en for sentences), keyboard shortcuts
-- Demo video with real English captions + Traditional Chinese translation (TED-Ed "3 tips to boost your confidence")
-- Visible “coming soon” stubs: sentence structure, exercises, shadowing, topic collections
-- Video deletion: single-delete (× button) and batch-delete (選取 mode) on 我的影片 page
+   ```bash
+   npm run build
+   node deploy/build-worker.mjs    # writes deploy/worker.js
+   npx wrangler deploy
+   ```
 
-## Milestone 2 (done)
+`deploy/build-worker.mjs` also writes `deploy/deploy-code.js` for a Cloudflare API upload. That helper reads `LINGOTUBE_D1_DATABASE_ID` from the environment or `.env`. It is not required if you deploy with Wrangler. Account ids and database ids should stay in env / `wrangler.toml`, not in source.
 
-- **AI Settings**: Enabled AI configuration in Settings page with test button (測試連線)
-- **Sentence Structure**: Watch 「句型」tab now functional - click 🧩 on any cue to see:
-  - Structure analysis (e.g., "Subject + Verb + Object")
-  - Breakdown with role labels and Traditional Chinese glosses
-  - Grammar notes in Traditional Chinese
-  - Translation
-- **Workers AI Integration**: Default AI provider via `/api/ai` route using Cloudflare Workers AI (@cf/meta/llama-3.1-8b-instruct-fast)
-- **OpenAI Compatible**: BYOK support for OpenAI, OpenRouter, Groq, Ollama, etc.
-- **Caching**: Sentence explanations cached in IndexedDB to avoid repeat AI calls
+The Worker serves the SPA and these routes: `/api/captions`, `/api/ai`, `/api/tts`, `/api/stt`, `/api/sync/*`.
 
-## Milestone 3 (done)
+## Limitations and roadmap
 
-- **Topics Page**: Auto-group saved words, sentences, and videos by theme (e.g., "心理·自信", "科技", "日常對話")
-  - Generate topics button with AI
-  - Cached results persist in IndexedDB
-  - Click items to navigate to source (video/saved page)
-- **Exercise Generation**: Watch 「練習」tab generates practice exercises:
-  - Multiple types: cloze (填充), multiple-choice (選擇), translate (翻譯), order (排序)
-  - Interactive checking with explanations
-  - Cached per video
-  - Regenerate button
-- Both features work with Workers AI or BYOK
+- YouTube sometimes bot-checks caption requests. The app retries transient failures and shows a short Chinese message asking you to try later or import a file. It does not always succeed.
+- Some videos (including the bundled TED-Ed demo, depending on the client) disable embedding. Subtitles and timer mode still work; “open in YouTube” is offered.
+- Shadowing scores and 句型拆解 are English-oriented. For Chinese, Japanese, or Korean as the primary subtitle line, the app shows a short note and does not split CJK text into tappable words (there are no spaces to split on, and a character-by-character split would look wrong).
+- Google Translate TTS is an unofficial endpoint. Aura / MeloTTS are the fallback, and quality varies.
+- A 同步碼 is equivalent to a password for that space. There is no account recovery and no server-side identity.
+- Article scripts themselves are not included in sync.
+- Scores are computed when you open a recorded line; they are not stored as a history of attempts.
 
-## Milestone 4 (done)
+Possible next steps (not implemented): richer CJK segmentation and lookup, persisting shadowing scores, embedding more reliably, and a public issue tracker as the project is published.
 
-- **Shadowing/Speech Practice**: Watch 「跟讀」tab with Web SpeechRecognition:
-  - Play audio of current sentence
-  - Record user speech via browser SpeechRecognition API
-  - Score accuracy (0-100%) using Levenshtein distance
-  - Show recognized transcript and missed words
-  - Navigate through sentences (prev/next)
-  - Graceful fallback message for unsupported browsers (Chrome/Safari required)
+## License
 
+MIT © 2026 Gordon Yau. See [LICENSE](LICENSE).
 
-## Deploy (unlisted, Cloudflare Worker)
-
-```bash
-npm run build && node deploy/build-worker.mjs   # bundles dist/ into deploy/worker.js + deploy/deploy-code.js
-```
-`deploy-code.js` is an async arrow function for the Cloudflare connector `execute` tool (PUTs Worker script `lingotube`, then enable its workers.dev subdomain). Live at https://lingotube.hackerkurumi.workers.dev (noindex).
-
-## Roadmap
-
-- ✅ **M1** – Core video player, subtitles, word lookup, vocab bank, SRS review
-- ✅ **M2** – AI sentence structure, Workers AI integration, BYOK support
-- ✅ **M3** – Topic grouping, exercise generation
-- ✅ **M4** – Shadowing with speech recognition
-- **M5** – Enhanced deployment, optional cloud sync
-
-## AI Configuration
-
-LingoTube supports three AI modes:
-
-### 1. Workers AI (Default, No Setup Required)
-
-When deployed to Cloudflare Workers with the `AI` binding, the app automatically uses Workers AI via the `/api/ai` endpoint. This provides:
-- **Model**: `@cf/meta/llama-3.1-8b-instruct-fast`
-- **Features**: Sentence structure, topic grouping, exercise generation
-- **Cost**: Free (included in Cloudflare Workers AI free tier)
-- **Limitations**: Smaller model, may be less accurate than GPT-4 class models
-
-### 2. OpenAI Compatible (BYOK)
-
-For better results, configure your own API key in Settings:
-1. Go to Settings → AI 服務
-2. Select "OpenAI 相容"
-3. Enter Base URL (e.g., `https://api.openai.com/v1`)
-4. Enter Model (e.g., `gpt-4o-mini`)
-5. Enter API Key
-6. Click 測試連線 to verify
-
-Supports:
-- OpenAI (gpt-4o, gpt-4o-mini, etc.)
-- OpenRouter (access to Claude, Gemini, etc.)
-- Groq (fast inference)
-- Ollama (local models)
-- LM Studio (local)
-
-### 3. No AI Mode
-
-Select "不使用 AI" in Settings. The app remains fully functional with:
-- Manual subtitle import
-- Offline dictionary
-- All non-AI features (video playback, vocab bank, SRS review)
-
-## Notes
-
-- Demo video © TED-Ed (CC BY-NC-ND); English captions are TED-Ed's, the Chinese translation was written for this project.
-- API keys never leave the device and are excluded from JSON exports.
-- AI responses are cached in IndexedDB to minimize API calls.
-
-## 自動抓字幕 (`GET /api/captions?v=<11-char id>`)
-
-The deployed Worker (`worker/captions.js`, inlined by `deploy/build-worker.mjs`) fetches subtitles server-side so the phone just pastes a link.
-
-- Returns `{title, en:[{start,end,text}], zh:[...], enSource, zhSource, note?, debug}`; the app merges with `mergeBilingual`.
-- yt-dlp and browser cookies can't run in a Worker (no Python/subprocess), so the same logic is reimplemented in JS: 11-char ID check → InnerTube `player` (ANDROID / IOS / ANDROID_VR clients, then watch-page scrape) → `captionTracks` → json3 → cues (dedupe consecutive repeats; auto-captions are rebuilt into sentences from word timings).
-- English: manual track first, else auto (asr). Chinese: zh-Hant / zh-Hans track → YouTube machine translation (`tlang=zh-Hant`) → Workers AI (Qwen3, batched, binding `AI`) → public gtx.
-- YouTube's bot check is intermittent per Cloudflare IP; the app retries transient `blocked/failed` responses up to 3 times. Errors are Chinese (`blocked`, `no_en` = 「這部影片找不到英文字幕」, `unavailable`, `bad_id`).
-- Fallbacks on Home: paste text (SRT/VTT or YouTube "Show transcript" with `0:05` stamps), file import, local yt-dlp proxy.
-- Test: `node scripts/add-flow.mjs <url>` (phone-size add-video flow).
+The bundled demo video is from TED-Ed (“3 tips to boost your confidence”). English captions are TED-Ed’s; the Traditional Chinese translation in the demo was written for this project. Please respect TED-Ed’s licence if you redistribute that material.
