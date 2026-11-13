@@ -5,12 +5,16 @@ export interface Cue {
   zh?: string
 }
 
+export type CaptionLang = 'en' | 'zh' | 'ja' | 'ko'
+
 export interface VideoRec {
   id: string // internal id (we use the YouTube id)
   youtubeId: string
   title: string
   cues: Cue[]
   createdAt: number
+  /** Primary subtitle language. Missing on older records = English. */
+  captionLang?: CaptionLang
   demo?: boolean
   updatedAt?: number
   dirty?: number

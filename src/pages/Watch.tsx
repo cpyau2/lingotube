@@ -6,7 +6,8 @@ import { useYouTube } from '../lib/player'
 import { fmtTime } from '../lib/subs'
 import { speak } from '../lib/tts'
 import { newSrs } from '../lib/srs'
-import type { Cue, SentenceRec, VideoPrefs, VideoRec } from '../lib/types'
+import type { CaptionLang, Cue, SentenceRec, VideoPrefs, VideoRec } from '../lib/types'
+import { ENGLISH_ONLY_NOTE, isCjkLang, primaryLangAttr, primaryToggleLabel, secondaryLangAttr, secondaryToggleLabel, speakLang } from '../lib/captionLang'
 import WordSheet, { type WordCtx } from '../components/WordSheet'
 import { StructurePanel } from '../components/StructurePanel'
 import { ExercisePanel } from '../components/ExercisePanel'
@@ -17,12 +18,36 @@ const RATES = [0.75, 1, 1.25, 1.5]
 
 type Tab = 'subs' | 'structure' | 'exercise' | 'shadow'
 
+/** English: tappable words. CJK has no spaces, so we show the line as a whole (no character-by-character split). */
+function PrimaryLine({ text, lang, className, savedWords, onWord }: {
+  text: string; lang?: CaptionLang; className?: string; savedWords?: Set<string>; onWord?: (w: string) => void
+}) {
+  const attr = primaryLangAttr(lang)
+  if (isCjkLang(lang)) {
+    return <div className={className} lang={attr}>{text}</div>
+  }
+  return (
+    <div className={className} lang={attr}>
+      {text.split(WORD_RE).map((part, i) =>
+        i % 2 === 1 ? (
+          <span
+            key={i}
+            role="button"
+            className={`word ${savedWords?.has(part.toLowerCase()) ? 'saved' : ''}`}
+            onClick={(e) => { e.stopPropagation(); onWord?.(part) }}
+          >{part}</span>
+        ) : (<span key={i}>{part}</span>),
+      )}
+    </div>
+  )
+}
+
 const CueRow = memo(function CueRow(props: {
   cue: Cue; idx: number; active: boolean; prefs: VideoPrefs; saved: boolean; savedWords: Set<string>
+  captionLang?: CaptionLang
   onSeek: (i: number) => void; onWord: (w: string, i: number) => void; onSave: (i: number) => void; onStructure: (i: number) => void
 }) {
-  const { cue, idx, active, prefs, saved, savedWords } = props
-  const parts = useMemo(() => cue.en.split(WORD_RE), [cue.en])
+  const { cue, idx, active, prefs, saved, savedWords, captionLang } = props
   return (
     <div
       data-idx={idx}
@@ -34,28 +59,23 @@ const CueRow = memo(function CueRow(props: {
       <div className={`text-[11px] tabular-nums pt-1 w-9 shrink-0 ${active ? 'text-sky-300' : 'text-slate-500'}`}>{fmtTime(cue.start)}</div>
       <div className="flex-1 min-w-0" style={{ fontSize: `${prefs.fontScale}rem` }}>
         {prefs.showEn && (
-          <div className={`leading-snug ${active ? 'text-white font-medium' : 'text-slate-200'}`} lang="en">
-            {parts.map((p, i) =>
-              i % 2 === 1 ? (
-                <span
-                  key={i}
-                  role="button"
-                  className={`word ${savedWords.has(p.toLowerCase()) ? 'saved' : ''}`}
-                  onClick={(e) => { e.stopPropagation(); props.onWord(p, idx) }}
-                >{p}</span>
-              ) : (<span key={i}>{p}</span>),
-            )}
-          </div>
+          <PrimaryLine
+            text={cue.en}
+            lang={captionLang}
+            className={`leading-snug ${active ? 'text-white font-medium' : 'text-slate-200'}`}
+            savedWords={savedWords}
+            onWord={(w) => props.onWord(w, idx)}
+          />
         )}
         {prefs.showZh && cue.zh && (
-          <div className={`mt-0.5 leading-snug ${active ? 'text-amber-200' : 'text-slate-400'}`} style={{ fontSize: '0.92em' }} lang="zh-Hant">{cue.zh}</div>
+          <div className={`mt-0.5 leading-snug ${active ? 'text-amber-200' : 'text-slate-400'}`} style={{ fontSize: '0.92em' }} lang={secondaryLangAttr(captionLang)}>{cue.zh}</div>
         )}
       </div>
       <div className="flex flex-col gap-1 shrink-0 -mr-1">
         <button aria-label="收藏句子" data-testid="save-sentence" title="收藏句子"
           onClick={(e) => { e.stopPropagation(); props.onSave(idx) }}
           className={`text-lg leading-none p-1 rounded ${saved ? 'text-amber-300' : 'text-slate-500 hover:text-slate-200'}`}>{saved ? '★' : '☆'}</button>
-        <button aria-label="朗讀" title="朗讀" onClick={(e) => { e.stopPropagation(); speak(cue.en) }} className="text-sm leading-none p-1 text-slate-500 hover:text-slate-200">🔊</button>
+        <button aria-label="朗讀" title="朗讀" onClick={(e) => { e.stopPropagation(); speak(cue.en, { lang: speakLang(captionLang) }) }} className="text-sm leading-none p-1 text-slate-500 hover:text-slate-200">🔊</button>
         <button aria-label="句子結構" title="句子結構" onClick={(e) => { e.stopPropagation(); props.onStructure(idx) }} className="text-sm leading-none p-1 text-slate-500 hover:text-slate-200">🧩</button>
       </div>
     </div>
@@ -162,8 +182,8 @@ export default function Watch() {
   if (!video) return <div className="p-6"><p className="mb-3">找不到這部影片。</p><Link className="btn" to="/">返回首頁</Link></div>
 
   const toggles: { k: keyof VideoPrefs; label: string }[] = [
-    { k: 'showEn', label: 'EN 英文' },
-    { k: 'showZh', label: '中 中文' },
+    { k: 'showEn', label: primaryToggleLabel(video.captionLang) },
+    { k: 'showZh', label: secondaryToggleLabel(video.captionLang) },
     { k: 'autoScroll', label: '自動捲動' },
     { k: 'loopLine', label: '單句循環' },
     { k: 'pauseOnWordTap', label: '點字暫停' },
@@ -215,15 +235,17 @@ export default function Watch() {
           {active >= 0 && video.cues[active] ? (
             <>
               {prefs.showEn && (
-                <div className="text-2xl leading-snug font-medium" lang="en">
-                  {video.cues[active].en.split(WORD_RE).map((p, i) => i % 2 === 1
-                    ? <span key={i} role="button" className={`word ${savedWords.has(p.toLowerCase()) ? 'saved' : ''}`} onClick={() => onWord(p, active)}>{p}</span>
-                    : <span key={i}>{p}</span>)}
-                </div>
+                <PrimaryLine
+                  text={video.cues[active].en}
+                  lang={video.captionLang}
+                  className="text-2xl leading-snug font-medium"
+                  savedWords={savedWords}
+                  onWord={(w) => onWord(w, active)}
+                />
               )}
-              {prefs.showZh && video.cues[active].zh && <div className="text-xl text-amber-200 mt-2" lang="zh-Hant">{video.cues[active].zh}</div>}
+              {prefs.showZh && video.cues[active].zh && <div className="text-xl text-amber-200 mt-2" lang={secondaryLangAttr(video.captionLang)}>{video.cues[active].zh}</div>}
             </>
-          ) : <div className="text-slate-500 text-sm">播放時，目前的句子會顯示在這裡。點任何英文字可以查詞。</div>}
+          ) : <div className="text-slate-500 text-sm">{isCjkLang(video.captionLang) ? '播放時，目前的句子會顯示在這裡。' : '播放時，目前的句子會顯示在這裡。點任何英文字可以查詞。'}</div>}
         </div>
       </section>
 
@@ -243,6 +265,7 @@ export default function Watch() {
           <div ref={listRef} className="flex-1 min-h-0 scroll-y relative p-2 space-y-0.5" data-testid="cue-list">
             {video.cues.map((c, i) => (
               <CueRow key={i} cue={c} idx={i} active={i === active} prefs={prefs} saved={savedStarts.has(c.start)} savedWords={savedWords}
+                captionLang={video.captionLang}
                 onSeek={onSeek} onWord={onWord} onSave={onSave} onStructure={onStructure} />
             ))}
             {!video.cues.length && <div className="p-6 text-slate-400 text-sm">這部影片未有字幕。到首頁匯入 .srt / .vtt / .txt。</div>}
@@ -251,11 +274,12 @@ export default function Watch() {
         )}
         {tab === 'structure' && (
           <div className="p-4 space-y-3 scroll-y">
+            {isCjkLang(video.captionLang) && <div className="text-xs text-amber-300/90">{ENGLISH_ONLY_NOTE}</div>}
             {curCue ? (
               <>
                 <div className="card p-3 text-sm">
-                  <div className="text-slate-200">{curCue.en}</div>
-                  {curCue.zh && <div className="text-slate-400 mt-1">{curCue.zh}</div>}
+                  <div className="text-slate-200" lang={primaryLangAttr(video.captionLang)}>{curCue.en}</div>
+                  {curCue.zh && <div className="text-slate-400 mt-1" lang={secondaryLangAttr(video.captionLang)}>{curCue.zh}</div>}
                 </div>
                 <StructurePanel sentence={curCue.en} />
               </>
@@ -267,12 +291,14 @@ export default function Watch() {
           </div>
         )}
         {tab === 'exercise' && (
-          <div className="p-4 scroll-y">
+          <div className="p-4 scroll-y space-y-3">
+            {isCjkLang(video.captionLang) && <div className="text-xs text-amber-300/90">{ENGLISH_ONLY_NOTE}</div>}
             <ExercisePanel videoId={id} cues={video.cues} />
           </div>
         )}
         {tab === 'shadow' && (
-          <div className="p-4 scroll-y">
+          <div className="p-4 scroll-y space-y-3">
+            {isCjkLang(video.captionLang) && <div className="text-xs text-amber-300/90">{ENGLISH_ONLY_NOTE}</div>}
             <ShadowPanel cues={video.cues} currentIdx={active} videoId={id} player={get()} />
           </div>
         )}

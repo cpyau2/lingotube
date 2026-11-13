@@ -22,9 +22,11 @@ export async function speak(text: string, opts: { rate?: number; lang?: string }
   const u = new SpeechSynthesisUtterance(text)
   u.lang = opts.lang ?? 'en-US'
   u.rate = opts.rate ?? 0.95
+  const prefix = (u.lang || 'en').split('-')[0]
   const pick =
     voices.find((v) => v.lang === u.lang && /google|samantha|natural|enhanced/i.test(v.name)) ||
     voices.find((v) => v.lang === u.lang) ||
+    voices.find((v) => v.lang.startsWith(prefix)) ||
     voices.find((v) => v.lang.startsWith('en'))
   if (pick) u.voice = pick
   speechSynthesis.speak(u)

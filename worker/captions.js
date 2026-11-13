@@ -1,5 +1,8 @@
 // LingoTube captions endpoint (runs inside the Cloudflare Worker, same origin as the app).
-// GET /api/captions?v=<11-char id>  ->  { id, title, en:[{start,end,text}], zh:[{start,end,text}], enSource, zhSource, note? }
+// GET /api/captions?v=<11-char id>&lang=en|zh|ja|ko
+//   -> { id, title, en:[{start,end,text}], zh:[{start,end,text}], enSource, zhSource, lang, note? }
+// `en` is the primary line (the chosen language); `zh` is the secondary line
+// (Chinese for en/ja/ko, English for zh). Field names are historical.
 // yt-dlp / browser cookies can't run in a Worker (no subprocess), so this re-implements the useful parts in JS:
 // InnerTube player call (several clients) -> captionTracks -> json3 -> cues, with watch-page scraping as fallback.
 
@@ -18,10 +21,25 @@ export class CapError extends Error {
 const MSG = {
   bad_id: '影片 ID 唔正確（要 11 個字元）',
   no_en: '這部影片找不到英文字幕',
+  no_zh: '這部影片找不到中文字幕',
+  no_ja: '這部影片找不到日文字幕',
+  no_ko: '這部影片找不到韓文字幕',
   blocked: 'YouTube 暫時封鎖咗自動抓字幕，請遲啲再試或者匯入字幕檔',
   unavailable: '呢條片未能播放（私人／已刪除／地區限制），抓唔到字幕',
   no_captions: '這部影片找不到英文字幕',
   failed: '抓字幕失敗，請遲啲再試或者匯入字幕檔',
+}
+
+const LANGS = {
+  en: { code: 'no_en', error: MSG.no_en, name: '英文' },
+  zh: { code: 'no_zh', error: MSG.no_zh, name: '中文' },
+  ja: { code: 'no_ja', error: MSG.no_ja, name: '日文' },
+  ko: { code: 'no_ko', error: MSG.no_ko, name: '韓文' },
+}
+
+function normalizeLang(v) {
+  v = String(v || 'en').toLowerCase()
+  return LANGS[v] ? v : 'en'
 }
 
 const json = (obj, status = 200, extra = {}) =>
@@ -71,8 +89,8 @@ async function getPlayer(id, log) {
   throw new CapError('failed', MSG.failed, 502, log)
 }
 
-const isZhHant = (l) => /^zh-(Hant|TW|HK|MO)|^yue/i.test(l)
-const isZhHans = (l) => /^zh(-(Hans|CN|SG))?$/i.test(l)
+const isZhHant = (l) => /^(zh-Hant|zh-TW|zh-HK|zh-MO|yue)/i.test(l)
+const isZhHans = (l) => /^(zh-Hans|zh-CN|zh-SG|zh)$/i.test(l)
 const isEn = (l) => /^en(-|$)/i.test(l)
 
 function pickEnglish(tracks) {
@@ -82,6 +100,23 @@ function pickEnglish(tracks) {
 function pickZh(tracks) {
   const z = tracks.filter((t) => /^(zh|yue)/i.test(t.languageCode) && t.kind !== 'asr')
   return { hant: z.find((t) => isZhHant(t.languageCode)) || null, hans: z.find((t) => isZhHans(t.languageCode)) || null }
+}
+/** Chinese as a primary track: manual Traditional, then manual Simplified, then the same for auto-generated. */
+function pickZhPrimary(tracks) {
+  const all = tracks.filter((t) => /^(zh|yue)/i.test(t.languageCode))
+  const prefer = (list) =>
+    list.find((t) => isZhHant(t.languageCode)) ||
+    list.find((t) => isZhHans(t.languageCode)) ||
+    list[0] ||
+    null
+  return prefer(all.filter((t) => t.kind !== 'asr')) || prefer(all.filter((t) => t.kind === 'asr'))
+}
+function pickLang(tracks, lang) {
+  if (lang === 'en') return pickEnglish(tracks)
+  if (lang === 'zh') return pickZhPrimary(tracks)
+  const re = lang === 'ja' ? /^ja(-|$)/i : /^ko(-|$)/i
+  const t = tracks.filter((x) => re.test(x.languageCode))
+  return t.find((x) => x.kind !== 'asr') || t.find((x) => x.kind === 'asr') || null
 }
 
 async function fetchTrack(baseUrl, ua, extra = '') {
@@ -157,7 +192,7 @@ function asrToSentences(j) {
 
 function stripTags(s) { return s.replace(/<[^>]+>/g, '') }
 
-async function googleTranslate(lines, log) {
+async function googleTranslate(lines, log, sl = 'en') {
   // public gtx endpoint, batched (a Worker has a small subrequest budget)
   const out = new Array(lines.length).fill('')
   const batches = []
@@ -167,7 +202,7 @@ async function googleTranslate(lines, log) {
   if (batches.length > 25) throw new CapError('failed', MSG.failed, 502, 'too many cues to machine-translate')
   for (const b of batches) {
     const q = b.map((i) => lines[i].replace(/\n/g, ' ')).join('\n')
-    const r = await fetch('https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=zh-TW&dt=t', {
+    const r = await fetch('https://translate.googleapis.com/translate_a/single?client=gtx&sl=' + encodeURIComponent(sl || 'en') + '&tl=zh-TW&dt=t', {
       method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', 'user-agent': BROWSER_UA }, body: 'q=' + encodeURIComponent(q),
     })
     if (!r.ok) { log.push(`gtx: HTTP ${r.status}`); throw new CapError('blocked', MSG.blocked, 503, `gtx HTTP ${r.status}`) }
@@ -189,7 +224,7 @@ function aiText(r) {
   return r.response || ''
 }
 
-async function aiTranslate(env, lines, log) {
+async function aiTranslate(env, lines, log, srcLang = 'en') {
   // Cloudflare Workers AI (LLM), batched: every AI call counts as a subrequest, and a Worker only gets ~50.
   const out = new Array(lines.length).fill('')
   const batches = []
@@ -204,7 +239,9 @@ async function aiTranslate(env, lines, log) {
       try {
         const r = await env.AI.run(AI_MODELS[Math.min(model, AI_MODELS.length - 1)], {
           messages: [
-            { role: 'system', content: 'You translate English video subtitles into Traditional Chinese (繁體中文, natural spoken Taiwan/Hong Kong wording). Input lines look like "N|English". Reply with exactly the same number of lines, each "N|中文". No explanations, no extra text.' },
+            { role: 'system', content: srcLang === 'en'
+              ? 'You translate English video subtitles into Traditional Chinese (繁體中文, natural spoken Taiwan/Hong Kong wording). Input lines look like "N|English". Reply with exactly the same number of lines, each "N|中文". No explanations, no extra text.'
+              : 'You translate ' + (srcLang === 'ja' ? 'Japanese' : 'Korean') + ' video subtitles into Traditional Chinese (繁體中文, natural spoken Taiwan/Hong Kong wording). Input lines look like "N|text". Reply with exactly the same number of lines, each "N|中文". No explanations, no extra text.' },
             { role: 'user', content: user },
           ],
           max_tokens: 2048, temperature: 0.2,
@@ -227,16 +264,7 @@ async function aiTranslate(env, lines, log) {
   return out
 }
 
-export async function fetchCaptions(id, env) {
-  const log = []
-  const { title, tracks, ua } = await getPlayer(id, log)
-  const enT = pickEnglish(tracks)
-  if (!enT) throw new CapError('no_en', MSG.no_en, 404, log)
-  const asr = enT.kind === 'asr'
-  const enJ = await fetchTrack(enT.baseUrl, ua)
-  const en = json3ToCues(enJ, asr)
-  if (!en.length) throw new CapError('no_en', MSG.no_en, 404, log)
-
+async function fetchChineseSecondary(primaryT, primary, tracks, ua, env, log, srcLang = 'en') {
   let zh = [], zhSource = 'none'
   const { hant, hans } = pickZh(tracks)
   const tryTrack = async (t, src) => { const c = json3ToCues(await fetchTrack(t.baseUrl, ua), false); if (c.length) { zh = c; zhSource = src; return true } return false }
@@ -244,38 +272,78 @@ export async function fetchCaptions(id, env) {
     if (hant && (await tryTrack(hant, 'track:zh-Hant'))) { /* done */ }
     else if (hans && (await tryTrack(hans, 'track:zh-Hans'))) { /* done */ }
   } catch (e) { log.push('zh track: ' + (e.detail || e.message)) }
-  if (!zh.length && enT.isTranslatable !== false) {
+  if (!zh.length && primaryT.isTranslatable !== false) {
     try {
-      const c = json3ToCues(await fetchTrack(enT.baseUrl, ua, '&tlang=zh-Hant'), false)
+      const c = json3ToCues(await fetchTrack(primaryT.baseUrl, ua, '&tlang=zh-Hant'), false)
       if (c.length) { zh = c; zhSource = 'youtube-mt:zh-Hant' }
     } catch (e) { log.push('tlang: ' + (e.detail || e.message)) }
   }
-  if (!zh.length && env && env.AI && en.length <= 800) {
+  if (!zh.length && env && env.AI && primary.length <= 800) {
     try {
-      const t = await aiTranslate(env, en.map((c) => c.text), log)
-      zh = en.map((c, i) => ({ start: c.start, end: c.end, text: t[i] })).filter((c) => c.text)
+      const t = await aiTranslate(env, primary.map((c) => c.text), log, srcLang)
+      zh = primary.map((c, i) => ({ start: c.start, end: c.end, text: t[i] })).filter((c) => c.text)
       if (zh.length) zhSource = 'workers-ai:zh-Hant'
     } catch (e) { log.push('workers-ai: ' + (e.detail || e.message)) }
   }
   if (!zh.length) {
     try {
-      const t = await googleTranslate(en.map((c) => c.text), log)
-      zh = en.map((c, i) => ({ start: c.start, end: c.end, text: t[i] })).filter((c) => c.text)
+      const t = await googleTranslate(primary.map((c) => c.text), log, srcLang)
+      zh = primary.map((c, i) => ({ start: c.start, end: c.end, text: t[i] })).filter((c) => c.text)
       if (zh.length) zhSource = 'google-translate:zh-TW'
     } catch (e) { log.push('gtx: ' + (e.detail || e.message)) }
   }
-  return { id, title, en, zh, enSource: asr ? 'auto-captions' : 'manual', zhSource, note: zh.length ? undefined : '未能取得中文翻譯，只顯示英文', debug: log }
+  return { zh, zhSource }
+}
+
+export async function fetchCaptions(id, env, lang = 'en') {
+  lang = normalizeLang(lang)
+  const meta = LANGS[lang]
+  const log = []
+  const { title, tracks, ua } = await getPlayer(id, log)
+  const primaryT = pickLang(tracks, lang)
+  if (!primaryT) throw new CapError(meta.code, meta.error, 404, log)
+  const asr = primaryT.kind === 'asr'
+  // English auto-captions are rebuilt into sentences; CJK auto-captions stay as raw cue windows
+  // so we don't insert spaces or split on English punctuation.
+  const primary = json3ToCues(await fetchTrack(primaryT.baseUrl, ua), asr && lang === 'en')
+  if (!primary.length) throw new CapError(meta.code, meta.error, 404, log)
+
+  let secondary = [], secondarySource = 'none'
+  if (lang === 'zh') {
+    const enT = pickEnglish(tracks)
+    if (enT) {
+      try {
+        const c = json3ToCues(await fetchTrack(enT.baseUrl, ua), enT.kind === 'asr')
+        if (c.length) { secondary = c; secondarySource = enT.kind === 'asr' ? 'auto-captions' : 'manual' }
+      } catch (e) { log.push('en track: ' + (e.detail || e.message)) }
+    }
+    if (!secondary.length && primaryT.isTranslatable !== false) {
+      try {
+        const c = json3ToCues(await fetchTrack(primaryT.baseUrl, ua, '&tlang=en'), false)
+        if (c.length) { secondary = c; secondarySource = 'youtube-mt:en' }
+      } catch (e) { log.push('tlang-en: ' + (e.detail || e.message)) }
+    }
+  } else {
+    const r = await fetchChineseSecondary(primaryT, primary, tracks, ua, env, log, lang)
+    secondary = r.zh
+    secondarySource = r.zhSource
+  }
+
+  const note = secondary.length ? undefined
+    : (lang === 'zh' ? '未能取得英文字幕，只顯示中文' : '未能取得中文翻譯，只顯示' + meta.name)
+  return { id, title, en: primary, zh: secondary, enSource: asr ? 'auto-captions' : 'manual', zhSource: secondarySource, lang, note, debug: log }
 }
 
 export async function handleCaptions(request, env) {
   const url = new URL(request.url)
   const id = url.searchParams.get('v') || ''
   if (!/^[A-Za-z0-9_-]{11}$/.test(id)) return json({ error: MSG.bad_id, code: 'bad_id' }, 400)
-  const cacheKey = new Request(`https://lingotube.cache/captions/${id}`)
+  const lang = normalizeLang(url.searchParams.get('lang'))
+  const cacheKey = new Request(`https://lingotube.cache/captions/${id}/${lang}`)
   let cache = null
   try { cache = caches.default; const hit = await cache.match(cacheKey); if (hit && !url.searchParams.has('fresh')) return new Response(hit.body, { status: 200, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-lingotube-cache': 'HIT' } }) } catch { /* cache unavailable */ }
   try {
-    const data = await fetchCaptions(id, env)
+    const data = await fetchCaptions(id, env, lang)
     const body = JSON.stringify(data)
     if (cache && data.zh.length) { try { await cache.put(cacheKey, new Response(body, { headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=86400' } })) } catch { /* ignore */ } }
     return new Response(body, { status: 200, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-lingotube-cache': 'MISS' } })

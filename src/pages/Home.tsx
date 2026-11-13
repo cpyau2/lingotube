@@ -6,7 +6,8 @@ import { mergeBilingual, parseSubtitleText, parseYouTubeId, fmtTime } from '../l
 import { fetchAutoCaptions } from '../lib/autoCaptions'
 import { fetchViaProxy, DEFAULT_PROXY } from '../lib/captionsProxy'
 import { Page } from '../components/Page'
-import type { Cue } from '../lib/types'
+import type { CaptionLang, Cue } from '../lib/types'
+import { CAPTION_LANGS, LS_CAPTION_LANG, normalizeCaptionLang } from '../lib/captionLang'
 
 async function readFile(f: File | null | undefined) {
   return f ? parseSubtitleText(await f.text()) : undefined
@@ -30,12 +31,20 @@ function AddVideo({ onDone }: { onDone: (id: string) => void }) {
   const [info, setInfo] = useState('')
   const [progress, setProgress] = useState('')
   const [busy, setBusy] = useState(false)
+  const [capLang, setCapLang] = useState<CaptionLang>(() => {
+    try { return normalizeCaptionLang(localStorage.getItem(LS_CAPTION_LANG)) } catch { return 'en' }
+  })
   const enRef = useRef<HTMLInputElement>(null)
   const zhRef = useRef<HTMLInputElement>(null)
 
-  const save = async (yid: string, t: string, cues: Cue[]) => {
+  const changeCapLang = (lang: CaptionLang) => {
+    setCapLang(lang)
+    try { localStorage.setItem(LS_CAPTION_LANG, lang) } catch { /* private mode */ }
+  }
+
+  const save = async (yid: string, t: string, cues: Cue[], captionLang: CaptionLang = 'en') => {
     t = t.trim() || (await guessTitle(yid))
-    await db.videos.put({ id: yid, youtubeId: yid, title: t, cues, createdAt: Date.now() })
+    await db.videos.put({ id: yid, youtubeId: yid, title: t, cues, createdAt: Date.now(), captionLang })
     onDone(yid)
   }
 
@@ -47,12 +56,13 @@ function AddVideo({ onDone }: { onDone: (id: string) => void }) {
       if (!yid) throw new Error('請先貼上有效嘅 YouTube 連結（例如 https://youtu.be/xxxxxxxxxxx）')
       if (mode === 'auto') {
         setProgress('連接 YouTube…')
-        timers.push(window.setTimeout(() => setProgress('下載字幕…'), 1500), window.setTimeout(() => setProgress('翻譯成中文（可能要幾秒）…'), 4000))
-        const r = await fetchAutoCaptions(yid, (n) => setProgress(`YouTube 暫時未肯俾字幕，重試第 ${n} 次…`))
+        const later = capLang === 'zh' ? '下載英文字幕（如有）…' : '翻譯成中文（可能要幾秒）…'
+        timers.push(window.setTimeout(() => setProgress('下載字幕…'), 1500), window.setTimeout(() => setProgress(later), 4000))
+        const r = await fetchAutoCaptions(yid, (n) => setProgress(`YouTube 暫時未肯俾字幕，重試第 ${n} 次…`), capLang)
         if (!title.trim()) setTitle(r.title)
         setProgress(`已取得 ${r.cues.length} 句字幕，儲存中…`)
         if (r.note) setInfo(r.note)
-        await save(yid, title.trim() || r.title, r.cues)
+        await save(yid, title.trim() || r.title, r.cues, capLang)
         return
       }
       if (mode === 'proxy') {
@@ -83,9 +93,24 @@ function AddVideo({ onDone }: { onDone: (id: string) => void }) {
       <div className="font-semibold">＋ 加入 YouTube 影片</div>
       <input type="url" inputMode="url" placeholder="貼上 YouTube 連結" value={url} onChange={(e) => setUrl(e.target.value)} data-testid="add-url" />
       <input type="text" placeholder="標題（可留空，會自動填入）" value={title} onChange={(e) => setTitle(e.target.value)} />
-      <button className="btn w-full !py-3 text-base" disabled={busy || !url.trim()} onClick={() => submit('auto')} data-testid="auto-fetch">
-        {busy && progress ? <span className="animate-pulse">⏳ {progress}</span> : '✨ 自動抓字幕'}
-      </button>
+      <div className="flex gap-2 items-stretch">
+        <label className="shrink-0">
+          <span className="sr-only">字幕語言</span>
+          <select
+            className="h-full min-h-[46px] rounded-xl border border-line bg-ink px-2.5 text-sm"
+            value={capLang}
+            onChange={(e) => changeCapLang(e.target.value as CaptionLang)}
+            disabled={busy}
+            data-testid="caption-lang"
+            aria-label="字幕語言"
+          >
+            {CAPTION_LANGS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </label>
+        <button className="btn flex-1 !py-3 text-base" disabled={busy || !url.trim()} onClick={() => submit('auto')} data-testid="auto-fetch">
+          {busy && progress ? <span className="animate-pulse">⏳ {progress}</span> : '✨ 自動抓字幕'}
+        </button>
+      </div>
       {info && <div className="text-amber-300 text-sm" data-testid="add-info">{info}</div>}
       {err && <div className="text-rose-300 text-sm" role="alert" data-testid="add-error">{err}</div>}
 
@@ -111,7 +136,7 @@ function AddVideo({ onDone }: { onDone: (id: string) => void }) {
           </div>
         </div>
       </div>
-      <p className="text-xs text-slate-500">「自動抓字幕」會由伺服器讀取 YouTube 字幕（優先人手字幕，其次自動字幕），中文用現成中文字幕或機器翻譯。</p>
+      <p className="text-xs text-slate-500">「自動抓字幕」可先揀字幕語言（英文／中文／日文／韓文，會記住上次選擇）。伺服器會讀取 YouTube 字幕（優先人手字幕，其次自動字幕）。英文、日文、韓文會盡量附上中文對照；中文則盡量附上英文。</p>
     </div>
   )
 }

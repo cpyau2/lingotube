@@ -27,7 +27,7 @@ export default function App() {
   useEffect(() => {
     // seed the bundled demo video (works fully offline), unless a synced delete tombstone exists
     Promise.all([db.videos.get(DEMO_VIDEO_ID), db.tombstones.get('videos:' + DEMO_VIDEO_ID)]).then(([v, tomb]) => {
-      if (!v && !tomb) db.videos.put({ id: DEMO_VIDEO_ID, youtubeId: DEMO_VIDEO_ID, title: DEMO_TITLE, cues: DEMO_CUES, createdAt: Date.now(), demo: true })
+      if (!v && !tomb) db.videos.put({ id: DEMO_VIDEO_ID, youtubeId: DEMO_VIDEO_ID, title: DEMO_TITLE, cues: DEMO_CUES, createdAt: Date.now(), demo: true, captionLang: 'en' })
     })
     initSync()
   }, [])
