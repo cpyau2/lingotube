@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Page, SoonPanel } from '../components/Page'
 import { DEFAULT_AI_SETTINGS, loadAISettings, saveAISettings, type AISettings } from '../lib/ai/provider'
+import { loadStructureTier, saveStructureTier, type StructureTier } from '../lib/structureTier'
 import { db, exportAll, importAll } from '../lib/db'
 import { DEFAULT_PROXY } from '../lib/captionsProxy'
 import { speak, ttsSupported } from '../lib/tts'
@@ -8,6 +9,7 @@ import { SyncPanel } from '../components/SyncPanel'
 
 export default function Settings() {
   const [ai, setAi] = useState<AISettings>(DEFAULT_AI_SETTINGS)
+  const [structureTier, setStructureTier] = useState<StructureTier>('accurate')
   const [proxy, setProxy] = useState(DEFAULT_PROXY)
   const [msg, setMsg] = useState('')
   const [testMsg, setTestMsg] = useState('')
@@ -17,6 +19,7 @@ export default function Settings() {
 
   useEffect(() => {
     loadAISettings().then(setAi)
+    setStructureTier(loadStructureTier())
     db.kv.get('proxy-url').then((r) => r && setProxy(r.value as string))
     const h = (e: Event) => { e.preventDefault(); setInstallEvt(e) }
     window.addEventListener('beforeinstallprompt', h)
@@ -75,6 +78,31 @@ export default function Settings() {
         <div className="card p-4 space-y-3" data-testid="ai-settings">
           <div className="font-semibold">AI 服務</div>
           <p className="text-sm text-slate-400">用於翻譯、句型解釋、練習題與主題分組。未設定時會使用 Cloudflare Workers AI（免費但功能較簡單）。BYOK 可獲得更好效果。Key 只儲存喺你這部裝置的瀏覽器，不會上傳。</p>
+          {!(ai.provider === 'openai-compatible' && ai.apiKey) && (
+            <div className="space-y-2" data-testid="structure-tier">
+              <div className="text-sm text-slate-300">句型拆解模式</div>
+              <div className="flex gap-2">
+                {([
+                  { value: 'accurate' as const, label: '精準' },
+                  { value: 'fast' as const, label: '慳額度' },
+                ]).map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    data-testid={`structure-tier-${opt.value}`}
+                    aria-pressed={structureTier === opt.value}
+                    onClick={() => { setStructureTier(opt.value); saveStructureTier(opt.value) }}
+                    className={`chip ${structureTier === opt.value ? 'bg-sky-500/20 text-sky-200 border-sky-400/50' : ''}`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-slate-500" lang="zh-Hant">
+                精準用 70B 大模型，較準但較耗額度；慳額度用 8B 細模型，快啲、用量約六分之一，長句可能拆得冇咁準。
+              </p>
+            </div>
+          )}
           <label className="block text-sm space-y-1"><span className="text-slate-300">服務類型</span>
             <select value={ai.provider} onChange={(e) => setAi({ ...ai, provider: e.target.value as AISettings['provider'] })}>
               <option value="none">不使用 AI</option>

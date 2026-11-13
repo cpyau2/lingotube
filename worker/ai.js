@@ -102,7 +102,7 @@ async function translate(env, lines, target) {
   )
 }
 
-async function explainSentence(env, sentence) {
+async function explainSentence(env, sentence, tier = 'accurate') {
   const systemPrompt = `You are an expert English teacher for Traditional Chinese speakers (Cantonese/Taiwanese). Analyze English sentences with extreme depth, covering structure, grammar, colloquial nuances, and spoken English patterns.
 
 Output ONLY valid JSON in this schema:
@@ -155,7 +155,8 @@ Few-shot example for "So, the first thing I want to talk about is pretty pretty 
 
 Analyze deeply: fixed collocations, omitted words, subject-verb agreement, adverb/adjective usage, spoken-English nuances, intonation markers, etc. Use Traditional Chinese (繁體中文) throughout. Never copy placeholder labels from the schema (do not output 子彈點標題, 嵌套點1, 嵌套點2, or "..."). Nested note titles must be real linguistic labels.`
 
-  const use70b = await tryReserveStructure70b(env)
+  const want70b = tier !== 'fast'
+  const use70b = want70b && await tryReserveStructure70b(env)
   const models = use70b ? AI_CHAT_MODELS_STRUCTURE : AI_CHAT_MODELS
   const raw = await jsonChat(env, systemPrompt, sentence, 3000, models)
   
@@ -214,7 +215,8 @@ Analyze deeply: fixed collocations, omitted words, subject-verb agreement, adver
     zh: String(a.zh || ''),
   }))
   
-  if (!use70b) raw.degraded = true
+  raw.model = use70b ? '70b' : '8b'
+  if (want70b && !use70b) raw.degraded = true
   return raw
 }
 
@@ -256,7 +258,7 @@ async function handleAI(req, env) {
         result = await translate(env, data.lines, data.target)
         break
       case 'explainSentence':
-        result = await explainSentence(env, data.sentence)
+        result = await explainSentence(env, data.sentence, data.tier === 'fast' ? 'fast' : 'accurate')
         break
       case 'generateExercises':
         result = await generateExercises(env, data.cues, data.n)

@@ -30,7 +30,7 @@ The shots below were taken from the live demo, using the bundled TED-Ed lesson a
 - **Auto-fetch captions** from YouTube in the browser (server-side Worker), preferring human-written tracks over auto-generated ones. Manual import of `.srt`, `.vtt`, and YouTube-style `.txt` transcripts as a fallback.
 - **Tap-to-define** on English words: Traditional Chinese gloss, English definition, IPA, and pronunciation. Save words and whole sentences to a vocab bank.
 - **Spaced repetition** (SM-2 style) for words and sentences.
-- **句型拆解:** AI breakdown of an English sentence (components, roles, grammar notes in Traditional Chinese). Cached on the device.
+- **句型拆解:** AI breakdown of an English sentence (components, roles, grammar notes in Traditional Chinese). Cached on the device. In Settings you can pick **精準** (Llama 3.3 70B, the default) or **慳額度** (a smaller 8B model, faster and cheaper). A cached 70B result can be reused in either mode; an 8B result is never shown as 精準.
 - **練習 and 主題:** generated exercises and theme grouping for saved items (Workers AI, or your own OpenAI-compatible key).
 - **跟讀 (video shadowing):** play the line from the video, record yourself, then play both back. Scoring uses phonetic matching (Metaphone) plus Levenshtein alignment and colours words as exact / close / missed.
 - **文章跟讀:** practise a passage split into stressed chunks (bundled A2 “Brunch & Dim Sum” demo, or paste your own).
@@ -154,7 +154,7 @@ The Worker serves the SPA and these routes: `/api/captions`, `/api/ai`, `/api/tt
 
 The hosted demo caps Workers AI so a shared free allocation cannot be exhausted by one visitor:
 
-- About **20** Llama 3.3 70B `句型拆解` calls per UTC day (the free allocation resets at 00:00 UTC). Further structure requests fall back to a smaller 8B model, and the UI shows a short note. Cached results in the browser do not count.
+- About **20** Llama 3.3 70B `句型拆解` calls per UTC day (the free allocation resets at 00:00 UTC). Further 精準 requests fall back to a smaller 8B model, and the UI shows a short note. Choosing **慳額度** in Settings goes straight to the 8B model and does not count against this cap. Cached results in the browser do not count.
 - About **10** `/api/ai` and `/api/stt` calls per IP per 10 minutes, and **60** `/api/tts` calls per IP per 10 minutes (edge-cached TTS is not counted). IPs are stored as SHA-256 hashes only.
 - These limits apply only to the Worker’s own Workers AI routes. If you set your own OpenAI-compatible key (BYOK) in Settings, your calls go to that provider and are not limited here.
 

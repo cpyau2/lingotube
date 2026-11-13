@@ -2,6 +2,14 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { SentenceExplanation } from '../lib/ai/provider'
 import { db } from '../lib/db'
+import {
+  inferStructureModel,
+  loadStructureTier,
+  readStructureCache,
+  structureModelLabel,
+  writeStructureCache,
+  type StructureTier,
+} from '../lib/structureTier'
 
 interface Props {
   sentence: string
@@ -40,35 +48,42 @@ export function StructurePanel({ sentence, onError }: Props) {
   const [error, setError] = useState('')
   const [explanation, setExplanation] = useState<SentenceExplanation | null>(null)
 
-  const load = async (forceRefresh = false) => {
+  const load = async (opts?: { force?: boolean; tier?: StructureTier }) => {
     setLoading(true)
     setError('')
 
     try {
-      // check cache first (unless force refresh)
-      const cacheKey = `struct:v2:${sentence}` // v2 to invalidate old cache
-      if (!forceRefresh) {
-        const cached = await db.kv.get(cacheKey)
-        if (cached?.value) {
-          setExplanation(cached.value as SentenceExplanation)
-          setLoading(false)
-          return
+      const { getProvider } = await import('../lib/ai/provider')
+      const provider = await getProvider()
+      const isWorkers = provider.id === 'workers-ai'
+      const tier: StructureTier = opts?.tier ?? (isWorkers ? loadStructureTier() : 'accurate')
+
+      if (!opts?.force) {
+        if (isWorkers) {
+          const cached = await readStructureCache(sentence, tier)
+          if (cached) {
+            setExplanation(cached)
+            setLoading(false)
+            return
+          }
+        } else {
+          const cached = await db.kv.get(`struct:v2:${sentence}`)
+          if (cached?.value) {
+            setExplanation(cached.value as SentenceExplanation)
+            setLoading(false)
+            return
+          }
         }
       }
 
-      // call AI
-      const { getProvider } = await import('../lib/ai/provider')
-      const provider = await getProvider()
-      
       if (!provider.available) {
         throw new Error('尚未設定 AI 服務')
       }
 
-      const result = await provider.explainSentence(sentence)
-      
-      // cache result
-      await db.kv.put({ key: cacheKey, value: result })
-      
+      const result = await provider.explainSentence(sentence, isWorkers ? { tier } : undefined)
+      if (isWorkers) await writeStructureCache(sentence, result)
+      else await db.kv.put({ key: `struct:v2:${sentence}`, value: result })
+
       setExplanation(result)
       setLoading(false)
     } catch (e: any) {
@@ -83,8 +98,11 @@ export function StructurePanel({ sentence, onError }: Props) {
     load()
   }, [sentence])
 
+  const shownModel = inferStructureModel(explanation)
   const handleRefresh = () => {
-    load(true)
+    // When the visible result is 8B, offer a 70B rerun even if Settings is still on 慳額度.
+    if (shownModel === '8b') load({ force: true, tier: 'accurate' })
+    else load({ force: true })
   }
 
   if (loading) {
@@ -174,11 +192,18 @@ export function StructurePanel({ sentence, onError }: Props) {
         <button 
           onClick={handleRefresh}
           className="text-xs text-sky-400 hover:text-sky-300 transition-colors px-2 py-1 rounded hover:bg-sky-500/10"
-          title="重新分析"
+          data-testid="structure-refresh"
+          title={shownModel === '8b' ? '用精準模式重新分析' : '重新分析'}
         >
-          🔄 重新分析
+          {shownModel === '8b' ? '用精準模式重新分析' : '🔄 重新分析'}
         </button>
       </div>
+
+      {structureModelLabel(shownModel) && (
+        <div className="text-[11px] text-slate-500" data-testid="structure-model" lang="zh-Hant">
+          {structureModelLabel(shownModel)}
+        </div>
+      )}
 
       {explanation.degraded && (
         <div className="text-xs text-amber-300/90 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2" lang="zh-Hant">

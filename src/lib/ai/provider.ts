@@ -1,3 +1,4 @@
+import type { StructureModel, StructureTier } from '../structureTier'
 import { db } from '../db'
 
 /**
@@ -34,6 +35,8 @@ export interface SentenceExplanation {
   translationZh: string
   /** True when the public demo fell back to a smaller model after the daily 70B cap. */
   degraded?: boolean
+  /** Workers AI model family that produced this result. Absent for BYOK. */
+  model?: StructureModel
   
   // Legacy fields for backward compatibility
   structure?: string
@@ -60,7 +63,7 @@ export interface AIProvider {
   readonly label: string
   readonly available: boolean
   translate(lines: string[], target: 'zh-Hant'): Promise<string[]>
-  explainSentence(sentence: string): Promise<SentenceExplanation>
+  explainSentence(sentence: string, opts?: { tier?: StructureTier }): Promise<SentenceExplanation>
   generateExercises(cues: { en: string; zh?: string }[], n: number): Promise<Exercise[]>
   groupTopics(items: { id: string; text: string }[]): Promise<TopicGroup[]>
 }
@@ -132,7 +135,7 @@ export class OpenAICompatibleProvider implements AIProvider {
       JSON.stringify(lines),
     )
   }
-  explainSentence(sentence: string) {
+  explainSentence(sentence: string, _opts?: { tier?: StructureTier }) {
     const systemPrompt = `You are an expert English teacher for Traditional Chinese speakers (Cantonese/Taiwanese). Analyze English sentences with extreme depth, covering structure, grammar, colloquial nuances, and spoken English patterns.
 
 Output ONLY valid JSON in this schema:
@@ -216,8 +219,9 @@ export class WorkersAIProvider implements AIProvider {
     return this.post('translate', { lines, target: 'zh-Hant' })
   }
 
-  async explainSentence(sentence: string): Promise<SentenceExplanation> {
-    return this.post('explainSentence', { sentence })
+  async explainSentence(sentence: string, opts?: { tier?: StructureTier }): Promise<SentenceExplanation> {
+    const tier = opts?.tier === 'fast' ? 'fast' : 'accurate'
+    return this.post('explainSentence', { sentence, tier })
   }
 
   async generateExercises(cues: { en: string; zh?: string }[], n: number): Promise<Exercise[]> {
