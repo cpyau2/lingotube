@@ -11,6 +11,7 @@ class LingoDB extends Dexie {
   articles!: Table<ArticleScript, number>
   audioCache!: Table<{ key: string; blob: Blob; createdAt: number }, string>
   recordings!: Table<{ key: string; blob: Blob; createdAt: number }, string>
+  tombstones!: Table<{ id: string; table: string; updatedAt: number; dirty?: number }, string>
 
   constructor() {
     super('lingotube')
@@ -55,10 +56,75 @@ class LingoDB extends Dexie {
       audioCache: 'key, createdAt',
       recordings: 'key, createdAt',
     })
+    // v5: updatedAt/dirty for sync + tombstones so deletes propagate
+    this.version(5).stores({
+      videos: 'id, createdAt, updatedAt, dirty',
+      prefs: 'id, updatedAt, dirty',
+      words: '++id, word, videoId, dueAt, createdAt, updatedAt, dirty',
+      sentences: '++id, videoId, start, dueAt, createdAt, updatedAt, dirty',
+      dict: 'key',
+      kv: 'key',
+      articles: '++id, createdAt',
+      audioCache: 'key, createdAt',
+      recordings: 'key, createdAt',
+      tombstones: 'id, table, updatedAt, dirty',
+    }).upgrade(async (tx) => {
+      const now = Date.now()
+      for (const name of ['videos', 'prefs', 'words', 'sentences'] as const) {
+        await tx.table(name).toCollection().modify((r: any) => {
+          if (r.updatedAt == null) r.updatedAt = r.createdAt || now
+          r.dirty = 1
+        })
+      }
+    })
   }
 }
 
 export const db = new LingoDB()
+
+const SYNCABLE = ['videos', 'prefs', 'words', 'sentences'] as const
+let applyingRemote = 0
+let onLocalChange: () => void = () => {}
+
+/** Suppress dirty/updatedAt stamping while applying a remote pull. */
+export async function withRemoteApply<T>(fn: () => Promise<T>): Promise<T> {
+  applyingRemote++
+  try { return await fn() } finally { applyingRemote-- }
+}
+
+export function setOnLocalChange(fn: () => void) { onLocalChange = fn }
+
+function noteLocalChange() {
+  if (applyingRemote) return
+  queueMicrotask(() => onLocalChange())
+}
+
+for (const name of SYNCABLE) {
+  db[name].hook('creating', (_pk, obj: any) => {
+    if (applyingRemote) {
+      if (obj.updatedAt == null) obj.updatedAt = Date.now()
+      if (obj.dirty == null) obj.dirty = 0
+    } else {
+      obj.updatedAt = Date.now()
+      obj.dirty = 1
+      noteLocalChange()
+    }
+  })
+  db[name].hook('updating', (mods: any) => {
+    if (applyingRemote) return mods
+    noteLocalChange()
+    return { ...mods, updatedAt: Date.now(), dirty: 1 }
+  })
+}
+
+export function wordSyncId(word: string) { return String(word).toLowerCase() }
+export function sentenceSyncId(videoId: string, start: number) { return `${videoId}:${start}` }
+export function tombstoneId(table: string, id: string) { return `${table}:${id}` }
+
+async function writeTombstone(table: string, id: string, at = Date.now()) {
+  await db.tombstones.put({ id: tombstoneId(table, id), table, updatedAt: at, dirty: 1 })
+  noteLocalChange()
+}
 
 export const defaultPrefs = (id: string): VideoPrefs => ({
   id,
@@ -105,22 +171,41 @@ export async function importAll(data: any) {
 }
 
 export async function deleteVideo(videoId: string) {
-  await db.transaction('rw', [db.videos, db.prefs, db.words, db.sentences], async () => {
+  await db.transaction('rw', [db.videos, db.prefs, db.words, db.sentences, db.tombstones], async () => {
+    const now = Date.now()
+    const words = await db.words.where('videoId').equals(videoId).toArray()
+    const sentences = await db.sentences.where('videoId').equals(videoId).toArray()
+    await db.tombstones.bulkPut([
+      { id: tombstoneId('videos', videoId), table: 'videos', updatedAt: now, dirty: 1 },
+      { id: tombstoneId('prefs', videoId), table: 'prefs', updatedAt: now, dirty: 1 },
+      ...words.map((w) => ({ id: tombstoneId('words', wordSyncId(w.word)), table: 'words', updatedAt: now, dirty: 1 })),
+      ...sentences.map((s) => ({ id: tombstoneId('sentences', sentenceSyncId(s.videoId, s.start)), table: 'sentences', updatedAt: now, dirty: 1 })),
+    ])
     await db.videos.delete(videoId)
     await db.prefs.delete(videoId)
     await db.words.where('videoId').equals(videoId).delete()
     await db.sentences.where('videoId').equals(videoId).delete()
   })
+  noteLocalChange()
 }
 
 export async function deleteVideos(videoIds: string[]) {
-  await db.transaction('rw', [db.videos, db.prefs, db.words, db.sentences], async () => {
-    await db.videos.bulkDelete(videoIds)
-    await db.prefs.bulkDelete(videoIds)
-    for (const videoId of videoIds) {
-      await db.words.where('videoId').equals(videoId).delete()
-      await db.sentences.where('videoId').equals(videoId).delete()
-    }
+  for (const id of videoIds) await deleteVideo(id)
+}
+
+export async function deleteWord(id: number) {
+  await db.transaction('rw', [db.words, db.tombstones], async () => {
+    const w = await db.words.get(id)
+    if (w) await writeTombstone('words', wordSyncId(w.word))
+    await db.words.delete(id)
+  })
+}
+
+export async function deleteSentence(id: number) {
+  await db.transaction('rw', [db.sentences, db.tombstones], async () => {
+    const s = await db.sentences.get(id)
+    if (s) await writeTombstone('sentences', sentenceSyncId(s.videoId, s.start))
+    await db.sentences.delete(id)
   })
 }
 

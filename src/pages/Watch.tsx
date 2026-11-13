@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, defaultPrefs } from '../lib/db'
+import { db, defaultPrefs, deleteSentence } from '../lib/db'
 import { useYouTube } from '../lib/player'
 import { fmtTime } from '../lib/subs'
 import { speak } from '../lib/tts'
@@ -152,7 +152,7 @@ export default function Watch() {
   const onSave = useCallback(async (i: number) => {
     const c = cuesRef.current[i]; if (!c) return
     const ex = await db.sentences.where('videoId').equals(id).and((s) => s.start === c.start).first()
-    if (ex?.id) { await db.sentences.delete(ex.id); return }
+    if (ex?.id) { await deleteSentence(ex.id); return }
     await db.sentences.add({ en: c.en, zh: c.zh, videoId: id, videoTitle: video?.title, start: c.start, end: c.end, createdAt: Date.now(), ...newSrs() })
   }, [id, video?.title])
 

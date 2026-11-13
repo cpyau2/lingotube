@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { NavLink, Route, Routes } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from './lib/db'
+import { initSync } from './lib/sync'
 import { DEMO_CUES, DEMO_TITLE, DEMO_VIDEO_ID } from './data/demo'
 import Home from './pages/Home'
 import Watch from './pages/Watch'
@@ -24,10 +25,11 @@ const nav = [
 
 export default function App() {
   useEffect(() => {
-    // seed the bundled demo video (works fully offline)
-    db.videos.get(DEMO_VIDEO_ID).then((v) => {
-      if (!v) db.videos.put({ id: DEMO_VIDEO_ID, youtubeId: DEMO_VIDEO_ID, title: DEMO_TITLE, cues: DEMO_CUES, createdAt: Date.now(), demo: true })
+    // seed the bundled demo video (works fully offline), unless a synced delete tombstone exists
+    Promise.all([db.videos.get(DEMO_VIDEO_ID), db.tombstones.get('videos:' + DEMO_VIDEO_ID)]).then(([v, tomb]) => {
+      if (!v && !tomb) db.videos.put({ id: DEMO_VIDEO_ID, youtubeId: DEMO_VIDEO_ID, title: DEMO_TITLE, cues: DEMO_CUES, createdAt: Date.now(), demo: true })
     })
+    initSync()
   }, [])
 
   const due = useLiveQuery(async () => {

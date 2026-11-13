@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db } from '../lib/db'
+import { db, deleteSentence, deleteWord } from '../lib/db'
 import { Page } from '../components/Page'
 import { pronounce, speak } from '../lib/tts'
 import { fmtTime } from '../lib/subs'
@@ -45,7 +45,7 @@ export default function Saved() {
                 </div>
                 <div className="flex flex-col gap-2">
                   <button className="btn ghost !px-2.5 !py-1.5" aria-label="發音" onClick={() => pronounce(w.word, w.audioUrl)}>🔊</button>
-                  <button className="btn ghost !px-2.5 !py-1.5" aria-label="刪除" onClick={() => w.id && db.words.delete(w.id)}>🗑</button>
+                  <button className="btn ghost !px-2.5 !py-1.5" aria-label="刪除" onClick={() => w.id && deleteWord(w.id)}>🗑</button>
                 </div>
               </div>
             </div>
@@ -66,7 +66,7 @@ export default function Saved() {
                 </div>
                 <div className="flex flex-col gap-2">
                   <button className="btn ghost !px-2.5 !py-1.5" aria-label="朗讀" onClick={() => speak(s.en)}>🔊</button>
-                  <button className="btn ghost !px-2.5 !py-1.5" aria-label="刪除" onClick={() => s.id && db.sentences.delete(s.id)}>🗑</button>
+                  <button className="btn ghost !px-2.5 !py-1.5" aria-label="刪除" onClick={() => s.id && deleteSentence(s.id)}>🗑</button>
                 </div>
               </div>
             </div>

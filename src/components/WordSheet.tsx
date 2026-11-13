@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { lookup } from '../lib/dict'
 import { pronounce } from '../lib/tts'
-import { db } from '../lib/db'
+import { db, deleteWord } from '../lib/db'
 import { newSrs } from '../lib/srs'
 import type { Cue, DictEntry } from '../lib/types'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -32,7 +32,7 @@ export default function WordSheet({ ctx, onClose }: { ctx: WordCtx; onClose: () 
   }, [onClose])
 
   const save = async () => {
-    if (saved?.id) { await db.words.delete(saved.id); return }
+    if (saved?.id) { await deleteWord(saved.id); return }
     const first = entry?.meanings[0]
     await db.words.add({
       word: w,

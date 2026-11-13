@@ -12,6 +12,8 @@ export interface VideoRec {
   cues: Cue[]
   createdAt: number
   demo?: boolean
+  updatedAt?: number
+  dirty?: number
 }
 
 export interface VideoPrefs {
@@ -23,6 +25,8 @@ export interface VideoPrefs {
   loopLine: boolean
   fontScale: number // 0.85 .. 1.5
   rate: number
+  updatedAt?: number
+  dirty?: number
 }
 
 export interface Srs {
@@ -48,6 +52,8 @@ export interface WordRec extends Srs {
   videoTitle?: string
   time?: number
   createdAt: number
+  updatedAt?: number
+  dirty?: number
 }
 
 export interface SentenceRec extends Srs {
@@ -59,6 +65,8 @@ export interface SentenceRec extends Srs {
   start: number
   end: number
   createdAt: number
+  updatedAt?: number
+  dirty?: number
 }
 
 export interface DictEntry {

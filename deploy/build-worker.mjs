@@ -24,7 +24,8 @@ const captionsSrc = fs.readFileSync('worker/captions.js', 'utf8').replace(/^expo
 const aiSrc = fs.readFileSync('worker/ai.js', 'utf8').replace(/^export /gm, '')
 const ttsSrc = fs.readFileSync('worker/tts.js', 'utf8').replace(/^export /gm, '')
 const sttSrc = fs.readFileSync('worker/stt.js', 'utf8').replace(/^export /gm, '')
-const worker = captionsSrc + '\n' + aiSrc + '\n' + ttsSrc + '\n' + sttSrc + `\nconst FILES = ${JSON.stringify(files)};
+const syncSrc = fs.readFileSync('worker/sync.js', 'utf8').replace(/^export /gm, '')
+const worker = captionsSrc + '\n' + aiSrc + '\n' + ttsSrc + '\n' + sttSrc + '\n' + syncSrc + `\nconst FILES = ${JSON.stringify(files)};
 const cache = new Map();
 function body(p) {
   const f = FILES[p];
@@ -35,12 +36,13 @@ function body(p) {
 export default {
   async fetch(req, env) {
     const p = new URL(req.url).pathname;
-    const isApiRoute = p === '/api/captions' || p === '/api/ai' || p === '/api/tts' || p === '/api/stt';
+    const isApiRoute = p === '/api/captions' || p === '/api/ai' || p === '/api/tts' || p === '/api/stt' || p === '/api/sync' || p.startsWith('/api/sync/');
     if (req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'POST') return new Response('Method Not Allowed', { status: 405 });
     if (p === '/api/captions') return req.method === 'GET' ? handleCaptions(req, env) : new Response('Method Not Allowed', { status: 405 });
     if (p === '/api/ai') return handleAI(req, env);
     if (p === '/api/tts') return handleTTS(req, env);
     if (p === '/api/stt') return handleSTT(req, env);
+    if (p === '/api/sync' || p.startsWith('/api/sync/')) return handleSync(req, env);
     if (req.method !== 'GET' && req.method !== 'HEAD') return new Response('Method Not Allowed', { status: 405 });
     let fp = p === '/' ? '/index.html' : p;
     let status = 200;
@@ -59,7 +61,7 @@ fs.writeFileSync('deploy/worker.js', worker)
 const code = `async () => {
 const SRC = ${JSON.stringify(worker)};
 const form = new FormData();
-form.append('metadata', new Blob([JSON.stringify({ main_module: 'worker.js', compatibility_date: '2026-01-01', bindings: [{ type: 'ai', name: 'AI' }] })], { type: 'application/json' }));
+form.append('metadata', new Blob([JSON.stringify({ main_module: 'worker.js', compatibility_date: '2026-01-01', bindings: [{ type: 'ai', name: 'AI' }, { type: 'd1', name: 'SYNC_DB', database_id: 'YOUR_D1_DATABASE_ID' }] })], { type: 'application/json' }));
 form.append('worker.js', new Blob([SRC], { type: 'application/javascript+module' }), 'worker.js');
 const put = await cloudflare.request({ method: 'PUT', path: \`/accounts/\${accountId}/workers/scripts/lingotube\`, body: form });
 return { success: put.success, errors: put.errors, id: put.result && put.result.id, size: SRC.length };

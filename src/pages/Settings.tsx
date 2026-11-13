@@ -4,6 +4,7 @@ import { DEFAULT_AI_SETTINGS, loadAISettings, saveAISettings, type AISettings } 
 import { db, exportAll, importAll } from '../lib/db'
 import { DEFAULT_PROXY } from '../lib/captionsProxy'
 import { speak, ttsSupported } from '../lib/tts'
+import { SyncPanel } from '../components/SyncPanel'
 
 export default function Settings() {
   const [ai, setAi] = useState<AISettings>(DEFAULT_AI_SETTINGS)
@@ -104,6 +105,8 @@ export default function Settings() {
           <button className="btn" onClick={save} data-testid="save-settings">儲存設定</button>
           {msg && <span className="text-sm text-emerald-300">{msg}</span>}
         </div>
+
+        <SyncPanel />
 
         <div className="card p-4 space-y-3">
           <div className="font-semibold">資料備份</div>
