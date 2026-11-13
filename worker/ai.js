@@ -155,7 +155,9 @@ Few-shot example for "So, the first thing I want to talk about is pretty pretty 
 
 Analyze deeply: fixed collocations, omitted words, subject-verb agreement, adverb/adjective usage, spoken-English nuances, intonation markers, etc. Use Traditional Chinese (繁體中文) throughout. Never copy placeholder labels from the schema (do not output 子彈點標題, 嵌套點1, 嵌套點2, or "..."). Nested note titles must be real linguistic labels.`
 
-  const raw = await jsonChat(env, systemPrompt, sentence, 3000, AI_CHAT_MODELS_STRUCTURE)
+  const use70b = await tryReserveStructure70b(env)
+  const models = use70b ? AI_CHAT_MODELS_STRUCTURE : AI_CHAT_MODELS
+  const raw = await jsonChat(env, systemPrompt, sentence, 3000, models)
   
   // Normalize and validate response
   if (!raw || typeof raw !== 'object') {
@@ -212,6 +214,7 @@ Analyze deeply: fixed collocations, omitted words, subject-verb agreement, adver
     zh: String(a.zh || ''),
   }))
   
+  if (!use70b) raw.degraded = true
   return raw
 }
 
@@ -239,6 +242,9 @@ async function handleAI(req, env) {
   if (req.method !== 'POST') {
     return new Response('Method Not Allowed', { status: 405 })
   }
+
+  const limited = await enforceIpLimit(req, env, 'ai')
+  if (limited) return limited
 
   try {
     const body = await req.json()

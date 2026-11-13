@@ -150,6 +150,25 @@ You need a Cloudflare account, Workers AI, and a D1 database.
 
 The Worker serves the SPA and these routes: `/api/captions`, `/api/ai`, `/api/tts`, `/api/stt`, `/api/sync/*`.
 
+### Usage limits (public demo)
+
+The hosted demo caps Workers AI so a shared free allocation cannot be exhausted by one visitor:
+
+- About **20** Llama 3.3 70B `句型拆解` calls per UTC day (the free allocation resets at 00:00 UTC). Further structure requests fall back to a smaller 8B model, and the UI shows a short note. Cached results in the browser do not count.
+- About **10** `/api/ai` and `/api/stt` calls per IP per 10 minutes, and **60** `/api/tts` calls per IP per 10 minutes (edge-cached TTS is not counted). IPs are stored as SHA-256 hashes only.
+- These limits apply only to the Worker’s own Workers AI routes. If you set your own OpenAI-compatible key (BYOK) in Settings, your calls go to that provider and are not limited here.
+
+To change the numbers on your own deploy, set Worker vars (or the same keys in `.env` before `node deploy/build-worker.mjs`):
+
+```
+STRUCTURE_70B_DAILY_CAP=20
+AI_IP_LIMIT=10
+STT_IP_LIMIT=10
+TTS_IP_LIMIT=60
+```
+
+See `wrangler.toml.example`. Raise or remove them if the Worker is only for you.
+
 ## Limitations and roadmap
 
 - YouTube sometimes bot-checks caption requests. The app retries transient failures and shows a short Chinese message asking you to try later or import a file. It does not always succeed.

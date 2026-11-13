@@ -20,3 +20,20 @@ CREATE TABLE IF NOT EXISTS records (
 );
 
 CREATE INDEX IF NOT EXISTS records_sync_cursor ON records (code_hash, seq);
+
+-- Usage caps for the public demo (Workers AI quota protection).
+-- IPs are stored as SHA-256 hex only, never the raw address.
+CREATE TABLE IF NOT EXISTS usage_daily (
+  key TEXT NOT NULL,
+  day TEXT NOT NULL,
+  count INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (key, day)
+);
+
+CREATE TABLE IF NOT EXISTS usage_ip (
+  ip_hash TEXT NOT NULL,
+  bucket TEXT NOT NULL,
+  window_start INTEGER NOT NULL,
+  count INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (ip_hash, bucket, window_start)
+);

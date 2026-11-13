@@ -36,12 +36,13 @@ function add(p) {
   }
 }
 walk(DIST)
+const limitsSrc = fs.readFileSync('worker/limits.js', 'utf8').replace(/^export /gm, '')
 const captionsSrc = fs.readFileSync('worker/captions.js', 'utf8').replace(/^export /gm, '')
 const aiSrc = fs.readFileSync('worker/ai.js', 'utf8').replace(/^export /gm, '')
 const ttsSrc = fs.readFileSync('worker/tts.js', 'utf8').replace(/^export /gm, '')
 const sttSrc = fs.readFileSync('worker/stt.js', 'utf8').replace(/^export /gm, '')
 const syncSrc = fs.readFileSync('worker/sync.js', 'utf8').replace(/^export /gm, '')
-const worker = captionsSrc + '\n' + aiSrc + '\n' + ttsSrc + '\n' + sttSrc + '\n' + syncSrc + `\nconst FILES = ${JSON.stringify(files)};
+const worker = limitsSrc + '\n' + captionsSrc + '\n' + aiSrc + '\n' + ttsSrc + '\n' + sttSrc + '\n' + syncSrc + `\nconst FILES = ${JSON.stringify(files)};
 const cache = new Map();
 function body(p) {
   const f = FILES[p];
@@ -78,10 +79,16 @@ if (!D1_DATABASE_ID) {
   console.warn('LINGOTUBE_D1_DATABASE_ID is not set. deploy/deploy-code.js will use a placeholder; set it in .env (see .env.example) before deploying with the API helper.')
 }
 const d1Id = D1_DATABASE_ID || 'YOUR_D1_DATABASE_ID'
+const limitBindings = [
+  { type: 'plain_text', name: 'STRUCTURE_70B_DAILY_CAP', text: process.env.STRUCTURE_70B_DAILY_CAP || '20' },
+  { type: 'plain_text', name: 'AI_IP_LIMIT', text: process.env.AI_IP_LIMIT || '10' },
+  { type: 'plain_text', name: 'STT_IP_LIMIT', text: process.env.STT_IP_LIMIT || '10' },
+  { type: 'plain_text', name: 'TTS_IP_LIMIT', text: process.env.TTS_IP_LIMIT || '60' },
+]
 const code = `async () => {
 const SRC = ${JSON.stringify(worker)};
 const form = new FormData();
-form.append('metadata', new Blob([JSON.stringify({ main_module: 'worker.js', compatibility_date: '2026-01-01', bindings: [{ type: 'ai', name: 'AI' }, { type: 'd1', name: 'SYNC_DB', database_id: ${JSON.stringify(d1Id)} }] })], { type: 'application/json' }));
+form.append('metadata', new Blob([JSON.stringify({ main_module: 'worker.js', compatibility_date: '2026-01-01', bindings: [{ type: 'ai', name: 'AI' }, { type: 'd1', name: 'SYNC_DB', database_id: ${JSON.stringify(d1Id)} }, ...${JSON.stringify(limitBindings)}] })], { type: 'application/json' }));
 form.append('worker.js', new Blob([SRC], { type: 'application/javascript+module' }), 'worker.js');
 const put = await cloudflare.request({ method: 'PUT', path: \`/accounts/\${accountId}/workers/scripts/${WORKER_NAME}\`, body: form });
 return { success: put.success, errors: put.errors, id: put.result && put.result.id, size: SRC.length };

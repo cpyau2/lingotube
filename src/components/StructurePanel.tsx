@@ -180,6 +180,12 @@ export function StructurePanel({ sentence, onError }: Props) {
         </button>
       </div>
 
+      {explanation.degraded && (
+        <div className="text-xs text-amber-300/90 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2" lang="zh-Hant">
+          今日示範額度已用完，暫時改用較細嘅模型，結果可能冇咁準。
+        </div>
+      )}
+
       {/* Original sentence */}
       <div className="card p-4">
         <div className="text-xs text-slate-500 mb-2">原文</div>

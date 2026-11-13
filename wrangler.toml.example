@@ -11,3 +11,10 @@ binding = "AI"
 binding = "SYNC_DB"
 database_name = "lingotube-sync"
 database_id = "YOUR_D1_DATABASE_ID"
+
+# Usage limits (public demo defaults). Raise or remove these on a private deploy.
+[vars]
+STRUCTURE_70B_DAILY_CAP = "20"
+AI_IP_LIMIT = "10"
+STT_IP_LIMIT = "10"
+TTS_IP_LIMIT = "60"

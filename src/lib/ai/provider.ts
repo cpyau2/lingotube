@@ -32,6 +32,8 @@ export interface SentenceExplanation {
     zh: string
   }[]
   translationZh: string
+  /** True when the public demo fell back to a smaller model after the daily 70B cap. */
+  degraded?: boolean
   
   // Legacy fields for backward compatibility
   structure?: string
@@ -205,8 +207,9 @@ export class WorkersAIProvider implements AIProvider {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ method, data }),
     })
-    if (!r.ok) throw new Error(`AI 服務錯誤 ${r.status}`)
-    return r.json()
+    const j = await r.json().catch(() => ({}))
+    if (!r.ok) throw new Error((j && j.error) || `AI 服務錯誤 ${r.status}`)
+    return j
   }
 
   async translate(lines: string[]): Promise<string[]> {

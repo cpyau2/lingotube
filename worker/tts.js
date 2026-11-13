@@ -155,6 +155,9 @@ async function handleTTS(req, env) {
       const cacheKey = new Request(req.url)
       let cached = await cache.match(cacheKey)
       if (cached) return cached
+
+      const limited = await enforceIpLimit(req, env, 'tts')
+      if (limited) return limited
       
       // Fetch from Google
       const audio = await fetchGoogleTTS(text, lang)
@@ -196,6 +199,9 @@ async function handleTTS(req, env) {
   if (req.method !== 'POST') {
     return new Response('Method Not Allowed', { status: 405 })
   }
+
+  const limitedPost = await enforceIpLimit(req, env, 'tts')
+  if (limitedPost) return limitedPost
 
   try {
     const body = await req.json()

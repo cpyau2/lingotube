@@ -53,6 +53,9 @@ async function handleSTT(req, env) {
     return new Response('Method Not Allowed', { status: 405 })
   }
 
+  const limited = await enforceIpLimit(req, env, 'stt')
+  if (limited) return limited
+
   try {
     // Accept either raw binary or form-data
     let audioBuffer
